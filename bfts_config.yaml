@@ -23,7 +23,7 @@ exec:
 generate_report: True
 # LLM settings for final report from journal
 report:
-  model: gpt-4o-2024-11-20
+  model: ollama/nemotron-3-nano:latest
   temp: 1.0
 
 experiment:
@@ -54,19 +54,19 @@ agent:
 
   # LLM settings for coding
   code:
-    model: anthropic.claude-3-5-sonnet-20241022-v2:0
+    model: ollama/nemotron-3-nano:latest
     temp: 1.0
     max_tokens: 12000
 
   # LLM settings for evaluating program output / tracebacks
   feedback:
-    model: gpt-4o-2024-11-20
+    model: ollama/nemotron-3-nano:latest
     # gpt-4o
     temp: 0.5
     max_tokens: 8192
 
   vlm_feedback:
-    model: gpt-4o-2024-11-20
+    model: ollama/nemotron-3-nano:latest
     temp: 0.5
     max_tokens: null
 
@@ -85,3 +85,119 @@ agent:
   # select_node:
   #   model: gpt-4o
   #   temp: 0.3
+
+# Global LLM Configuration
+# Defines connection details for various models and providers.
+# API Keys are loaded from environment variables using ${oc.env:VAR_NAME}
+llm_config:
+  default_model: "ollama/nemotron-3-nano:latest"
+  
+  # Global timeout for LLM calls (can be overridden per model)
+  timeout: 120
+
+  # Default configurations for providers to allow dynamic model names (e.g. ollama/new-model)
+  defaults:
+    ollama:
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+  
+  models:
+    # Ollama Models
+    "ollama/nemotron-3-nano:latest":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+    
+    "ollama/gpt-oss:20b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+      
+    "ollama/qwen3:8b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+
+    # OpenAI Models
+    "gpt-4o":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    "gpt-4o-mini":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    "gpt-4o-2024-05-13":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    # Anthropic Models
+    "claude-3-5-sonnet-20240620":
+      provider: "anthropic"
+      api_key: "${oc.env:ANTHROPIC_API_KEY, ''}"
+      
+    # DeepSeek
+    "deepseek-coder-v2-0724":
+      provider: "openai"
+      base_url: "https://api.deepseek.com"
+      api_key: "${oc.env:DEEPSEEK_API_KEY, ''}"
+      
+    # DeepCoder (HuggingFace)
+    "deepcoder-14b":
+      provider: "openai"
+      base_url: "https://api-inference.huggingface.co/models/agentica-org/DeepCoder-14B-Preview"
+      api_key: "${oc.env:HUGGINGFACE_API_KEY, ''}"
+      
+    # Llama via OpenRouter
+    "llama3.1-405b":
+      provider: "openai"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "${oc.env:OPENROUTER_API_KEY, ''}"
+      # The actual model name sent to the API might differ
+      # model_override: "meta-llama/llama-3.1-405b-instruct"
+      
+    # Gemini via OpenAI adapter
+    "gemini-2.0-flash":
+      provider: "openai"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      api_key: "${oc.env:GEMINI_API_KEY, ''}"
+
+    # VLM Models (OpenAI)
+    "gpt-4o-2024-08-06":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    "gpt-4o-2024-11-20":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    "gpt-4o-mini-2024-07-18":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    "o3-mini":
+      provider: "openai"
+      api_key: "${oc.env:OPENAI_API_KEY, ''}"
+      
+    # VLM Models (Ollama)
+    "ollama/llama4:16x17b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+      
+    "ollama/mistral-small3.2:24b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+      
+    "ollama/qwen2.5vl:32b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+      
+    "ollama/z-uo/qwen2.5vl_tools:32b":
+      provider: "ollama"
+      base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
+      api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
+

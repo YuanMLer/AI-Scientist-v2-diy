@@ -192,10 +192,31 @@ def generate_temp_free_idea(
                     )
 
                     if not all([action_match, arguments_match]):
-                        raise ValueError("Failed to parse the LLM response.")
-
-                    action = action_match.group(1).strip()
-                    arguments_text = arguments_match.group(1).strip()
+                        # Attempt to parse as direct JSON if regex fails
+                        try:
+                            # Check if the whole text is a JSON or contains a JSON block
+                            json_match = re.search(r"(\{.*\})", response_text, re.DOTALL)
+                            if json_match:
+                                potential_json = json_match.group(1)
+                                parsed_json = json.loads(potential_json)
+                                # Check if it looks like an idea
+                                if isinstance(parsed_json, dict) and all(k in parsed_json for k in ["Name", "Title", "Abstract"]):
+                                    # Treat as FinalizeIdea
+                                    action = "FinalizeIdea"
+                                    arguments_text = json.dumps({"idea": parsed_json})
+                                    print("Detected raw JSON idea, treating as FinalizeIdea.")
+                                else:
+                                    raise ValueError("Failed to parse the LLM response (JSON found but not an idea).")
+                            else:
+                                raise ValueError("Failed to parse the LLM response.")
+                        except Exception:
+                            raise ValueError("Failed to parse the LLM response.")
+                    else:
+                        action = action_match.group(1).strip()
+                        # Clean up action (remove brackets/quotes if present)
+                        action = action.strip('<>"\'')
+                        arguments_text = arguments_match.group(1).strip()
+                    
                     print(f"Action: {action}")
                     print(f"Arguments: {arguments_text}")
 
@@ -273,8 +294,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4o-2024-05-13",
-        choices=AVAILABLE_LLMS,
+        default="ollama/nemotron-3-nano:latest",
         help="Model to use for AI Scientist.",
     )
     parser.add_argument(

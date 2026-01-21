@@ -14,6 +14,7 @@ import logging
 
 from . import tree_export
 from . import copytree, preproc_data, serialize
+from ai_scientist.config_loader import load_config as loader_load_config
 
 shutup.mute_warnings()
 logging.basicConfig(

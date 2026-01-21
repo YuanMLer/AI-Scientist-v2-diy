@@ -4,6 +4,7 @@ import os
 from .utils import FunctionSpec, OutputType, opt_messages_to_list, backoff_create
 from funcy import notnone, once, select_values
 import anthropic
+from ai_scientist.config_loader import get_llm_config
 
 
 ANTHROPIC_TIMEOUT_EXCEPTIONS = (
@@ -54,7 +55,7 @@ def query(
         **filtered_kwargs,
     )
     req_time = time.time() - t0
-    print(filtered_kwargs)
+    # print(filtered_kwargs)
 
     if "thinking" in filtered_kwargs:
         assert (

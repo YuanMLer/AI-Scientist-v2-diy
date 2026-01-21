@@ -1,0 +1,27 @@
+models:
+  ollama:
+    base_url: "http://localhost:11434/v1"
+    model_name: "nemotron-3-nano:latest"
+    api_key_env: "OLLAMA_API_KEY"
+    timeout: 300
+    parameters:
+      temperature: 0.7
+      max_tokens: 4096
+  
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    model_name: "anthropic/claude-3.5-sonnet"
+    api_key_env: "OPENROUTER_API_KEY"
+    timeout: 600
+    parameters:
+      temperature: 0.7
+      max_tokens: 4096
+
+  cherryIn:
+    base_url: "https://api.cherryin.com/v1"
+    model_name: "gpt-4o"
+    api_key_env: "CHERRYIN_API_KEY"
+    timeout: 600
+    parameters:
+      temperature: 0.7
+      max_tokens: 4096

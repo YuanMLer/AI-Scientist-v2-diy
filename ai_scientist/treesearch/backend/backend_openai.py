@@ -1,11 +1,13 @@
 import json
 import logging
 import time
+import os
 
 from .utils import FunctionSpec, OutputType, opt_messages_to_list, backoff_create
 from funcy import notnone, once, select_values
 import openai
 from rich import print
+from ai_scientist.config_loader import get_llm_config
 
 logger = logging.getLogger("ai-scientist")
 
@@ -18,14 +20,13 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
 )
 
 def get_ai_client(model: str, max_retries=2) -> openai.OpenAI:
-    if model.startswith("ollama/"):
-        client = openai.OpenAI(
-            base_url="http://localhost:11434/v1", 
-            max_retries=max_retries
-        )
+    conf = get_llm_config(model)
+    if conf:
+        api_key = conf.get("api_key")
+        base_url = conf.get("base_url")
+        return openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=max_retries) 
     else:
-        client = openai.OpenAI(max_retries=max_retries)
-    return client
+        raise ValueError("conf is None in conf")
 
 
 def query(
@@ -44,7 +45,15 @@ def query(
         # force the model to use the function
         filtered_kwargs["tool_choice"] = func_spec.openai_tool_choice_dict
 
-    if filtered_kwargs.get("model", "").startswith("ollama/"):
+    # Determine provider to handle model name formatting
+    try:
+        conf = get_llm_config(model)
+        provider = conf.get("provider")
+    except Exception:
+        if model.startswith("ollama/"): provider = "ollama"
+        else: provider = "openai"
+
+    if provider == "ollama" and filtered_kwargs.get("model", "").startswith("ollama/"):
        filtered_kwargs["model"] = filtered_kwargs["model"].replace("ollama/", "")
 
     t0 = time.time()

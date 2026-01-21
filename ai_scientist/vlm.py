@@ -7,29 +7,16 @@ import openai
 import os
 from PIL import Image
 from ai_scientist.utils.token_tracker import track_token_usage
+from ai_scientist.config_loader import get_config, get_llm_config
 
 MAX_NUM_TOKENS = 4096
 
-AVAILABLE_VLMS = [
-    "gpt-4o-2024-05-13",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-2024-11-20",
-    "gpt-4o-mini-2024-07-18",
-    "o3-mini",
-
-    # Ollama models
-
-    # llama4
-    "ollama/llama4:16x17b",
-
-    # mistral
-    "ollama/mistral-small3.2:24b",
-
-    # qwen
-    "ollama/qwen2.5vl:32b",
-
-    "ollama/z-uo/qwen2.5vl_tools:32b",
-]
+# Load available models from configuration
+try:
+    _conf = get_config()
+    AVAILABLE_VLMS = list(_conf.llm_config.models.keys())
+except Exception:
+    AVAILABLE_VLMS = []
 
 
 def encode_image_to_base64(image_path: str) -> str:
@@ -51,7 +38,15 @@ def encode_image_to_base64(image_path: str) -> str:
 
 @track_token_usage
 def make_llm_call(client, model, temperature, system_message, prompt):
-    if model.startswith("ollama/"):
+    try:
+        conf = get_llm_config(model)
+        provider = conf.get("provider")
+    except Exception:
+        raise ValueError(f"Provider {provider} not supported for model {model} in make_llm_call.")
+
+
+    if provider == "ollama":
+        print(f"Using Ollama API with model {model}.")
         return client.chat.completions.create(
             model=model.replace("ollama/", ""),
             messages=[
@@ -64,37 +59,45 @@ def make_llm_call(client, model, temperature, system_message, prompt):
             stop=None,
             seed=0,
         )
-    elif "gpt" in model:
-        return client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_message},
-                *prompt,
-            ],
-            temperature=temperature,
-            max_tokens=MAX_NUM_TOKENS,
-            n=1,
-            stop=None,
-            seed=0,
-        )
-    elif "o1" in model or "o3" in model:
-        return client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "user", "content": system_message},
-                *prompt,
-            ],
-            temperature=1,
-            n=1,
-            seed=0,
-        )
+    elif provider == "openai":
+        # Check for O1/O3 models which have different API params
+        if "o1" in model or "o3" in model:
+             return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": system_message},
+                    *prompt,
+                ],
+                temperature=1,
+                n=1,
+                seed=0,
+            )
+        else:
+            return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    *prompt,
+                ],
+                temperature=temperature,
+                max_tokens=MAX_NUM_TOKENS,
+                n=1,
+                stop=None,
+                seed=0,
+            )
     else:
-        raise ValueError(f"Model {model} not supported.")
+        raise ValueError(f"Provider {provider} not supported for model {model} in make_llm_call.")
 
 
 @track_token_usage
 def make_vlm_call(client, model, temperature, system_message, prompt):
-    if model.startswith("ollama/"):
+    try:
+        conf = get_llm_config(model)
+        provider = conf.get("provider")
+    except Exception:
+        raise ValueError(f"Provider {provider} not supported for model {model} in make_vlm_call.")
+
+    if provider == "ollama":
         return client.chat.completions.create(
             model=model.replace("ollama/", ""),
             messages=[
@@ -104,7 +107,7 @@ def make_vlm_call(client, model, temperature, system_message, prompt):
             temperature=temperature,
             max_tokens=MAX_NUM_TOKENS,
         )
-    elif "gpt" in model:
+    elif provider == "openai":
         return client.chat.completions.create(
             model=model,
             messages=[
@@ -144,42 +147,42 @@ def get_response_from_vlm(
     if msg_history is None:
         msg_history = []
 
-    if model in AVAILABLE_VLMS:
-        # Convert single image path to list for consistent handling
-        if isinstance(image_paths, str):
-            image_paths = [image_paths]
+    # Check model availability - now using config so we trust the input or check config
+    # We allow the call if we can create a client for it.
+    
+    # Convert single image path to list for consistent handling
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
 
-        # Create content list starting with the text message
-        content = [{"type": "text", "text": msg}]
+    # Create content list starting with the text message
+    content = [{"type": "text", "text": msg}]
 
-        # Add each image to the content list
-        for image_path in image_paths[:max_images]:
-            base64_image = encode_image_to_base64(image_path)
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
-                        "detail": "low",
-                    },
-                }
-            )
-        # Construct message with all images
-        new_msg_history = msg_history + [{"role": "user", "content": content}]
-
-        response = make_vlm_call(
-            client,
-            model,
-            temperature,
-            system_message=system_message,
-            prompt=new_msg_history,
+    # Add each image to the content list
+    for image_path in image_paths[:max_images]:
+        base64_image = encode_image_to_base64(image_path)
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}",
+                    "detail": "low",
+                },
+            }
         )
+    # Construct message with all images
+    new_msg_history = msg_history + [{"role": "user", "content": content}]
 
-        content = response.choices[0].message.content
-        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    else:
-        raise ValueError(f"Model {model} not supported.")
+    response = make_vlm_call(
+        client,
+        model,
+        temperature,
+        system_message=system_message,
+        prompt=new_msg_history,
+    )
 
+    content = response.choices[0].message.content
+    new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    
     if print_debug:
         print()
         print("*" * 20 + " VLM START " + "*" * 20)
@@ -194,24 +197,17 @@ def get_response_from_vlm(
 
 def create_client(model: str) -> tuple[Any, str]:
     """Create client for vision-language model."""
-    if model in [
-        "gpt-4o-2024-05-13",
-        "gpt-4o-2024-08-06",
-        "gpt-4o-2024-11-20",
-        "gpt-4o-mini-2024-07-18",
-        "o3-mini",
-    ]:
-        print(f"Using OpenAI API with model {model}.")
-        return openai.OpenAI(), model
-    elif model.startswith("ollama/"):
-        print(f"Using Ollama API with model {model}.")
-        return openai.OpenAI(
-            api_key=os.environ.get("OLLAMA_API_KEY", ""),
-            base_url="http://localhost:11434/v1"
-        ), model
+    conf = get_llm_config(model)
+    if conf is not None:
+        provider = conf.get("provider")
+        api_key = conf.get("api_key")
+        base_url = conf.get("base_url")
+        print(f"Using {provider} API with model {model}.")
     else:
-        raise ValueError(f"Model {model} not supported.")
-
+        raise ValueError(f"conf is None")
+    
+    return openai.OpenAI(api_key=api_key, base_url=base_url), model
+    
 
 def extract_json_between_markers(llm_output: str) -> dict | None:
     # Regular expression pattern to find JSON content between ```json and ```
@@ -260,80 +256,68 @@ def get_batch_responses_from_vlm(
     n_responses: int = 1,
     max_images: int = 200,
 ) -> tuple[list[str], list[list[dict[str, Any]]]]:
-    """Get multiple responses from vision-language model for the same input.
-
-    Args:
-        msg: Text message to send
-        image_paths: Path(s) to image file(s)
-        client: OpenAI client instance
-        model: Name of model to use
-        system_message: System prompt
-        print_debug: Whether to print debug info
-        msg_history: Previous message history
-        temperature: Sampling temperature
-        n_responses: Number of responses to generate
-
-    Returns:
-        Tuple of (list of response strings, list of message histories)
-    """
+    """Get multiple responses from vision-language model for the same input."""
     if msg_history is None:
         msg_history = []
 
-    if model in AVAILABLE_VLMS:
-        # Convert single image path to list
-        if isinstance(image_paths, str):
-            image_paths = [image_paths]
+    # Convert single image path to list
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
 
-        # Create content list with text and images
-        content = [{"type": "text", "text": msg}]
-        for image_path in image_paths[:max_images]:
-            base64_image = encode_image_to_base64(image_path)
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
-                        "detail": "low",
-                    },
-                }
-            )
+    # Create content list with text and images
+    content = [{"type": "text", "text": msg}]
+    for image_path in image_paths[:max_images]:
+        base64_image = encode_image_to_base64(image_path)
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}",
+                    "detail": "low",
+                },
+            }
+        )
 
-        # Construct message with all images
-        new_msg_history = msg_history + [{"role": "user", "content": content}]
+    # Construct message with all images
+    new_msg_history = msg_history + [{"role": "user", "content": content}]
 
-        if model.startswith("ollama/"):
-            response = client.chat.completions.create(
-                model=model.replace("ollama/", ""),
-                messages=[
-                    {"role": "system", "content": system_message},
-                    *new_msg_history,
-                ],
-                temperature=temperature,
-                max_tokens=MAX_NUM_TOKENS,
-                n=n_responses,
-                seed=0,
-            )
-        else:
-            # Get multiple responses
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    *new_msg_history,
-                ],
-                temperature=temperature,
-                max_tokens=MAX_NUM_TOKENS,
-                n=n_responses,
-                seed=0,
-            )
+    try:
+        conf = get_llm_config(model)
+        provider = conf.get("provider")
+    except Exception:
+        raise ValueError("provider is not provided!")
 
-        # Extract content from all responses
-        contents = [r.message.content for r in response.choices]
-        new_msg_histories = [
-            new_msg_history + [{"role": "assistant", "content": c}] for c in contents
-        ]
+    if provider == "ollama":
+        response = client.chat.completions.create(
+            model=model.replace("ollama/", ""),
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=n_responses,
+            seed=0,
+        )
     else:
-        raise ValueError(f"Model {model} not supported.")
+        # Get multiple responses
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            temperature=temperature,
+            max_tokens=MAX_NUM_TOKENS,
+            n=n_responses,
+            seed=0,
+        )
+
+    # Extract content from all responses
+    contents = [r.message.content for r in response.choices]
+    new_msg_histories = [
+        new_msg_history + [{"role": "assistant", "content": c}] for c in contents
+    ]
 
     if print_debug:
         # Just print the first response

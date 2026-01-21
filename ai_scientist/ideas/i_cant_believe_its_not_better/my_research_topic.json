@@ -1,0 +1,42 @@
+[
+    {
+        "Name": "curvature_adaptive_lr",
+        "Title": "Curvature-Aware Adaptive Learning Rate Scheduler for Transformers via Loss Landscape Geometry",
+        "Short Hypothesis": "Adapting the learning rate in real-time based on local loss curvature estimates and cooldown dynamics will accelerate convergence and improve generalization of Transformer models beyond static schedules.",
+        "Related Work": "Recent works have shown that large learning rates induce landscape flattening and shift (Wang & Roberts, 2023); cooldown phases exhibit bias\u2013variance trade\u2011offs tied to shape (Dremov et al., 2025); curvature\u2011adaptive optimizers such as CALR (Maduranga, 2025) and HGM (Sarkar, 2025) improve stability; volatility\u2011based schedulers like VolSched improve flatness (Ren, 2025). Our proposal distinguishes itself by coupling a cheap diagonal Hessian estimate with a cooldown\u2011aware scaling rule that modulates step size both upward in flat regions and downward near sharp curvature, directly informed by these insights.",
+        "Abstract": "Transformer training is highly sensitive to the learning rate schedule, yet most approaches rely on static warmup/decay curves. We propose a curvature\u2011aware adaptive learning rate scheduler (CALR\u2011Trans) that estimates local loss curvature during training using a low\u2011cost diagonal Hessian approximation derived from successive gradient updates. The estimator feeds into an analytically motivated scaling factor that expands the step size in flat curvature regimes and contracts it near sharp minima, aligning with observed phenomena of landscape flattening and cooldown bias\u2013variance effects. CALR\u2011Trans integrates seamlessly with AdamW, requiring only two extra scalar computations per update. We hypothesize that this method will achieve faster convergence on standard language modeling benchmarks (e.g., WikiText\u2011103, GLUE) and yield flatter minima, improving downstream generalization compared to cosine decay or warmup\u2011stable schedules. Empirically, we expect a 15\u201320% reduction in training epochs with comparable or better final validation scores. The approach is computationally lightweight (<0.5% overhead), requires no extra hyperparameters beyond existing optimizer settings, and can be applied out\u2011of\u2011the\u2011box to any Transformer architecture.",
+        "Experiments": [
+            {
+                "Name": "WikiText-103 Language Modeling",
+                "Description": "Fine\u2011tune BERT\u2011base on WikiText\u2011103 using AdamW with CALR\u2011Trans vs. cosine decay and linear warmup schedules; evaluate validation perplexity, training epochs, and gradient norm trajectories.",
+                "Metrics": [
+                    "Final perplexity",
+                    "Training time (epochs)",
+                    "Peak gradient norm"
+                ]
+            },
+            {
+                "Name": "GLUE Benchmark",
+                "Description": "Train RoBERTa\u2011large on each GLUE task with CALR\u2011Trans vs. standard schedules; report average Matthews correlation and classification accuracy, plus Hessian diagonal flatness at convergence.",
+                "Metrics": [
+                    "Average GLUE score",
+                    "Flatness (eigenvalue ratio)",
+                    "Training steps to convergence"
+                ]
+            },
+            {
+                "Name": "Ablation of Curvature Estimate",
+                "Description": "Replace diagonal Hessian with moving\u2011average gradient norm or volatility metric; compare performance to full CALR\u2011Trans to isolate importance of curvature information.",
+                "Metrics": [
+                    "Perplexity drop",
+                    "Overhead increase"
+                ]
+            }
+        ],
+        "Risk Factors and Limitations": [
+            "Computational overhead may increase for very deep Transformers if Hessian diagonal is recomputed frequently; we mitigate by using one\u2011step finite differences.",
+            "Curvature estimates can be noisy in early training; we plan to apply a low\u2011pass filter or start adaptation after warmup.",
+            "The scheduler assumes local curvature approximates global geometry; highly non\u2011convex regions may still cause instability, requiring fallback to AdamW update when curvature exceeds a threshold."
+        ]
+    }
+]
