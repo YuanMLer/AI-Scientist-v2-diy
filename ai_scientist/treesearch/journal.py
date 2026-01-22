@@ -1,3 +1,20 @@
+"""
+实验日志与节点管理模块
+======================
+
+本模块定义了用于管理搜索树（Solution Tree）的核心数据结构，包括 `Node`（节点）和 `Journal`（日志）。
+它负责记录实验的每一步骤、代码、执行结果、评估指标以及节点之间的关系。
+
+主要功能：
+1. 定义 `Node` 类：表示搜索树中的单个节点，存储代码、计划、执行结果和评估信息。
+2. 定义 `Journal` 类：管理节点集合，提供节点的添加、检索、筛选（如最佳节点、Bug 节点）等功能。
+3. 定义 `InteractiveSession` 类：用于管理交互式会话（类似 Jupyter Notebook）的节点序列。
+4. 提供基于 LLM 的节点选择和实验总结生成功能。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 from __future__ import annotations
 import time
 import uuid
@@ -20,6 +37,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# 定义节点选择的函数规范（FunctionSpec），用于 LLM 调用
 node_selection_spec = FunctionSpec(
     name="select_best_implementation",
     description="Select the best implementation based on comprehensive analysis",
@@ -42,7 +60,35 @@ node_selection_spec = FunctionSpec(
 
 @dataclass(eq=False)
 class Node(DataClassJsonMixin):
-    """A single node in the solution tree. Contains code, execution results, and evaluation information."""
+    """
+    搜索树中的单个节点。
+    
+    包含代码、计划、执行结果和评估信息。
+    
+    Attributes:
+        plan (str): 节点的实验计划。
+        overall_plan (str): 整体实验计划。
+        code (str): 实验代码。
+        plot_code (str): 绘图代码。
+        plot_plan (str): 绘图计划。
+        step (int): 步骤编号。
+        id (str): 节点唯一标识符 (UUID)。
+        ctime (float): 创建时间戳。
+        parent (Optional[Node]): 父节点。
+        children (set[Node]): 子节点集合。
+        exp_results_dir (str): 实验结果目录。
+        _term_out (list[str]): 终端输出列表。
+        exec_time (float): 执行时间。
+        exc_type (str | None): 异常类型。
+        exc_info (dict | None): 异常信息。
+        exc_stack (list[tuple] | None): 异常堆栈。
+        analysis (str): 执行结果分析/反馈。
+        metric (MetricValue): 评估指标值。
+        is_buggy (bool): 是否为 Bug 节点。
+        is_buggy_plots (bool): 绘图是否出错。
+        plots (List[str]): 生成的图表路径（相对路径）。
+        vlm_feedback_summary (List[str]): VLM 反馈摘要。
+    """
 
     # ---- code & plan ----
     plan: str = field(default="", kw_only=True)  # type: ignore
@@ -118,6 +164,7 @@ class Node(DataClassJsonMixin):
     is_seed_agg_node: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
+        """初始化后的处理，确保 children 是 set 类型并建立父子关系。"""
         # Ensure children is a set even if initialized with a list
         if isinstance(self.children, list):
             self.children = set(self.children)
@@ -126,6 +173,11 @@ class Node(DataClassJsonMixin):
             self.parent.children.add(self)
 
     def __deepcopy__(self, memo):
+        """
+        深拷贝节点。
+        
+        注意：会保留父节点引用，但清空子节点集合，以避免循环引用和复制整个树。
+        """
         # Create a new instance with copied attributes
         cls = self.__class__
         result = cls.__new__(cls)
@@ -158,17 +210,27 @@ class Node(DataClassJsonMixin):
     @property
     def stage_name(self) -> Literal["draft", "debug", "improve"]:
         """
-        Return the stage of the node:
-        - "stage" if the node is an initial solution draft
-        - "debug" if the node is the result of a debugging step
-        - "improve" if the node is the result of an improvement step
+        获取节点的阶段名称。
+        
+        Returns:
+            Literal["draft", "debug", "improve"]:
+            - "draft": 如果节点是初始草稿（无父节点）。
+            - "debug": 如果节点是调试步骤的结果（父节点有 Bug）。
+            - "improve": 如果节点是改进步骤的结果（父节点正常）。
         """
         if self.parent is None:
             return "draft"
         return "debug" if self.parent.is_buggy else "improve"
 
     def absorb_exec_result(self, exec_result: ExecutionResult):
-        """Absorb the result of executing the code from this node."""
+        """
+        吸收代码执行结果。
+        
+        将 ExecutionResult 对象中的信息（输出、执行时间、异常等）复制到节点属性中。
+        
+        Args:
+            exec_result (ExecutionResult): 代码执行结果对象。
+        """
         self._term_out = exec_result.term_out
         self.exec_time = exec_result.exec_time
         self.exc_type = exec_result.exc_type
@@ -176,7 +238,12 @@ class Node(DataClassJsonMixin):
         self.exc_stack = exec_result.exc_stack
 
     def absorb_plot_exec_result(self, plot_exec_result: ExecutionResult):
-        """Absorb the result of executing the plotting code from this node."""
+        """
+        吸收绘图代码执行结果。
+        
+        Args:
+            plot_exec_result (ExecutionResult): 绘图代码执行结果对象。
+        """
         self.plot_term_out = plot_exec_result.term_out
         self.plot_exec_time = plot_exec_result.exec_time
         self.plot_exc_type = plot_exec_result.exc_type
@@ -185,12 +252,12 @@ class Node(DataClassJsonMixin):
 
     @property
     def term_out(self) -> str:
-        """Get the terminal output of the code execution (after truncating it)."""
+        """获取截断后的终端输出字符串。"""
         return trim_long_string("".join(self._term_out))
 
     @property
     def is_leaf(self) -> bool:
-        """Check if the node is a leaf node in the solution tree."""
+        """检查节点是否为叶子节点（无子节点）。"""
         return not self.children
 
     def __eq__(self, other):
@@ -202,17 +269,20 @@ class Node(DataClassJsonMixin):
     @property
     def debug_depth(self) -> int:
         """
-        Length of the current debug path
-        - 0 if the node is not a debug node (parent is not buggy)
-        - 1 if the parent is buggy but the skip parent isn't
-        - n if there were n consecutive debugging steps
+        获取当前调试路径的长度。
+        
+        Returns:
+            int:
+            - 0: 如果不是调试节点（父节点不是 Bug）。
+            - 1: 如果父节点是 Bug 但父节点的父节点不是。
+            - n: 如果是连续第 n 次调试。
         """
         if self.stage_name != "debug":
             return 0
         return self.parent.debug_depth + 1  # type: ignore
 
     def to_dict(self) -> Dict:
-        """Convert node to dictionary for serialization"""
+        """将节点转换为字典以进行序列化。"""
         return {
             "code": self.code,
             "plan": self.plan,
@@ -292,7 +362,16 @@ class Node(DataClassJsonMixin):
 
     @classmethod
     def from_dict(cls, data: Dict, journal: Optional[Journal] = None) -> "Node":
-        """Create a Node from a dictionary, optionally linking to journal for relationships"""
+        """
+        从字典创建 Node 实例。
+        
+        Args:
+            data (Dict): 包含节点数据的字典。
+            journal (Optional[Journal]): 关联的日志对象，用于恢复父子关系。
+            
+        Returns:
+            Node: 创建的节点实例。
+        """
         # Remove relationship IDs from constructor data
         parent_id = data.pop("parent_id", None)
         children = data.pop("children", [])
@@ -331,19 +410,32 @@ class Node(DataClassJsonMixin):
 @dataclass
 class InteractiveSession(DataClassJsonMixin):
     """
-    A collection of nodes for an interaction session
-    (when the agent interacts with a Jupyter notebook-like interface).
+    交互式会话。
+    
+    管理一组节点，代表 Agent 与类似 Jupyter Notebook 环境的交互序列。
     """
 
     nodes: list[Node] = field(default_factory=list)
     completed: bool = False
 
     def append(self, node: Node) -> None:
+        """向会话中添加一个节点，并自动设置步骤编号。"""
         node.step = len(self.nodes)
         self.nodes.append(node)
 
     def generate_nb_trace(self, include_prompt, comment_headers=True) -> str:
-        """Generate a trace of the interactive session in IPython format."""
+        """
+        生成 IPython 格式的会话跟踪记录。
+        
+        用于将交互过程格式化为 Notebook 样式。
+        
+        Args:
+            include_prompt (bool): 是否包含提示符。
+            comment_headers (bool): 是否注释掉头部信息。
+            
+        Returns:
+            str: 格式化的跟踪记录字符串。
+        """
         trace = []
         header_prefix = "## " if comment_headers else ""
         for n in self.nodes:
@@ -360,7 +452,11 @@ class InteractiveSession(DataClassJsonMixin):
 
 @dataclass
 class Journal:
-    """A collection of nodes representing the solution tree."""
+    """
+    日志类，表示整个解决方案树。
+    
+    管理所有的节点集合。
+    """
 
     nodes: list[Node] = field(default_factory=list)
 
@@ -368,27 +464,36 @@ class Journal:
         return self.nodes[idx]
 
     def __len__(self) -> int:
-        """Return the number of nodes in the journal."""
+        """返回日志中的节点数量。"""
         return len(self.nodes)
 
     def append(self, node: Node) -> None:
-        """Append a new node to the journal."""
+        """
+        向日志中添加新节点。
+        
+        Args:
+            node (Node): 要添加的节点。
+        """
         node.step = len(self.nodes)
         self.nodes.append(node)
 
     @property
     def draft_nodes(self) -> list[Node]:
-        """Return a list of nodes representing intial coding drafts"""
+        """返回所有初始草稿节点（无父节点）。"""
         return [n for n in self.nodes if n.parent is None]
 
     @property
     def buggy_nodes(self) -> list[Node]:
-        """Return a list of nodes that are considered buggy by the agent."""
+        """返回所有被标记为 Bug 的节点。"""
         return [n for n in self.nodes if n.is_buggy]
 
     @property
     def good_nodes(self) -> list[Node]:
-        """Return a list of nodes that are not considered buggy by the agent."""
+        """
+        返回所有非 Bug 节点。
+        
+        打印所有节点的 ID 和 Bug 状态以便调试。
+        """
         list_of_nodes = [
             [
                 n.step,
@@ -407,18 +512,30 @@ class Journal:
         ]
 
     def get_node_by_id(self, node_id: str) -> Optional[Node]:
-        """Get a node by its ID."""
+        """根据 ID 获取节点。"""
         for node in self.nodes:
             if node.id == node_id:
                 return node
         return None
 
     def get_metric_history(self) -> list[MetricValue]:
-        """Return a list of all metric values in the journal."""
+        """返回日志中所有节点的指标值历史。"""
         return [n.metric for n in self.nodes]
 
     def get_best_node(self, only_good=True, use_val_metric_only=False, cfg=None) -> None | Node:
-        """Return the best solution found so far."""
+        """
+        返回迄今为止找到的最佳解决方案节点。
+        
+        可以使用 LLM 进行综合评估，或仅基于验证指标。
+        
+        Args:
+            only_good (bool): 是否仅考虑非 Bug 节点。
+            use_val_metric_only (bool): 是否仅使用验证指标进行选择（不使用 LLM）。
+            cfg (Optional[Any]): 配置对象，包含 LLM 模型设置。
+            
+        Returns:
+            Optional[Node]: 最佳节点，如果没找到则返回 None。
+        """
         if only_good:
             nodes = self.good_nodes
             if not nodes:
@@ -502,7 +619,18 @@ class Journal:
             return max(nodes, key=lambda n: n.metric)
 
     def generate_summary(self, include_code: bool = False, **model_kwargs) -> str:
-        """Generate a summary of the research progress using LLM, including both successes and failures."""
+        """
+        使用 LLM 生成研究进展总结。
+        
+        分析成功和失败的实验，提供未来改进的见解。
+        
+        Args:
+            include_code (bool): 是否在 Prompt 中包含代码。
+            **model_kwargs: 传递给 LLM 的额外参数（如 model, temp）。
+            
+        Returns:
+            str: 生成的总结文本。
+        """
         if not self.nodes:
             return "No experiments conducted yet."
 
@@ -548,6 +676,7 @@ class Journal:
         return summary
 
     def generate_summary_old(self, include_code: bool = False) -> str:
+        """旧版总结生成方法（仅拼接字符串）。"""
         summary = []
         for n in self.good_nodes:
             summary_part = f"Design: {n.plan}\n"
@@ -559,11 +688,18 @@ class Journal:
         return "\n-------------------------------\n".join(summary)
 
     def to_dict(self):
-        """Convert journal to a JSON-serializable dictionary"""
+        """将 Journal 转换为 JSON 可序列化的字典。"""
         return {"nodes": [node.to_dict() for node in self.nodes]}
 
     def save_experiment_notes(self, workspace_dir: str, stage_name: str, cfg: Any) -> None:
-        """Save experimental notes and summaries to files"""
+        """
+        保存实验笔记和总结到文件。
+        
+        Args:
+            workspace_dir (str): 工作空间目录。
+            stage_name (str): 当前阶段名称。
+            cfg (Any): 配置对象。
+        """
         notes_dir = os.path.join(workspace_dir, "experiment_notes")
         os.makedirs(notes_dir, exist_ok=True)
 

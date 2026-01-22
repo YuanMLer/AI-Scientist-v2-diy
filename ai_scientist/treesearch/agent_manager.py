@@ -1,3 +1,24 @@
+"""
+Agent Manager 模块
+==================
+
+本模块定义了 `AgentManager` 类及其相关辅助类，用于管理 AI 科学家实验的整个生命周期。
+它负责将实验分解为多个阶段（Initial Implementation, Baseline Tuning, Creative Research, Ablation Studies），
+并协调每个阶段的 Agent 执行、进度评估和阶段转换。
+
+主要功能：
+1. 定义实验阶段 (`Stage`) 和阶段转换 (`StageTransition`) 的数据结构。
+2. 定义与 LLM 交互的函数规范 (`FunctionSpec`)，用于生成阶段配置和评估进度。
+3. `AgentManager` 类：
+    - 初始化并维护实验状态。
+    - 动态生成和管理实验阶段。
+    - 评估阶段完成情况和子阶段目标。
+    - 协调 `ParallelAgent` 的执行。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 from typing import List, Optional, Dict, Callable, Any, Tuple
 import pickle
 from dataclasses import dataclass
@@ -18,6 +39,7 @@ from .utils.metric import WorstMetricValue
 logger = logging.getLogger(__name__)
 
 
+# 定义生成阶段配置的函数规范 (JSON Schema)
 stage_config_spec = FunctionSpec(
     name="generate_stage_config",
     description="Generate configuration for the next experimental stage",
@@ -46,6 +68,7 @@ stage_config_spec = FunctionSpec(
     },
 )
 
+# 定义评估阶段进度的函数规范
 stage_progress_eval_spec = FunctionSpec(
     name="evaluate_stage_progression",
     description="Evaluate readiness to progress to next experimental stage",
@@ -75,6 +98,7 @@ stage_progress_eval_spec = FunctionSpec(
 )
 
 
+# 定义评估阶段完成情况的函数规范
 stage_completion_eval_spec = FunctionSpec(
     name="evaluate_stage_completion",
     description="Evaluate if the current stage is complete",
@@ -102,6 +126,17 @@ stage_completion_eval_spec = FunctionSpec(
 
 @dataclass
 class Stage:
+    """
+    表示实验的一个阶段。
+    
+    Attributes:
+        name (str): 阶段名称。
+        description (str): 阶段描述。
+        goals (List[str]): 阶段目标列表。
+        max_iterations (int): 该阶段的最大迭代次数。
+        num_drafts (int): 生成的草稿数量。
+        stage_number (int): 阶段序号 (1-4)。
+    """
     name: str
     description: str
     goals: List[str]
@@ -112,6 +147,15 @@ class Stage:
 
 @dataclass
 class StageTransition:
+    """
+    记录阶段之间的转换及其推理过程。
+    
+    Attributes:
+        from_stage (str): 源阶段名称。
+        to_stage (str): 目标阶段名称。
+        reason (str): 转换原因。
+        config_adjustments (Dict[str, Any]): 配置调整。
+    """
     """Records transition between stages and the reasoning"""
 
     from_stage: str
@@ -121,8 +165,29 @@ class StageTransition:
 
 
 class AgentManager:
+    """
+    管理 AI 科学家实验的整个生命周期。
+    
+    负责：
+    1. 管理实验阶段（Stage）。
+    2. 创建和协调 Agent 执行任务。
+    3. 跟踪实验进度和日志（Journal）。
+    4. 处理阶段转换和评估。
+    """
     def __init__(self, task_desc: str, cfg: Any, workspace_dir: Path):
+        """
+        初始化 AgentManager。
+        
+        Args:
+            task_desc (str): 任务描述 JSON 字符串。
+            cfg (Any): 配置对象。
+            workspace_dir (Path): 工作区目录。
+            
+        Raises:
+            ValueError: 如果 task_desc 缺少必要的键。
+        """
         self.task_desc = json.loads(task_desc)
+        # 验证任务描述中是否包含必要的字段
         for k in [
             "Title",
             "Abstract",
@@ -140,12 +205,16 @@ class AgentManager:
         self.journals: Dict[str, Journal] = {}
         self.stage_history: List[StageTransition] = []
         self.completed_stages: List[str] = []
+        
+        # 定义主要阶段及其名称映射
         self.main_stage_dict: Dict[int, str] = {
-            1: "initial_implementation",
-            2: "baseline_tuning",
-            3: "creative_research",
-            4: "ablation_studies",
+            1: "initial_implementation",  # 初始实现
+            2: "baseline_tuning",         # 基线调优
+            3: "creative_research",       # 创造性研究
+            4: "ablation_studies",        # 消融实验
         }
+        
+        # 定义每个主要阶段的目标
         self.main_stage_goals: Dict[int, str] = {
             1: """
                 - Focus on getting basic working implementation
@@ -166,9 +235,19 @@ class AgentManager:
                 - Use the same datasets you used from the previous stage""",
         }
         # Create initial stage
+        # 创建初始阶段
         self._create_initial_stage()
 
     def _get_max_iterations(self, stage_number: int) -> int:
+        """
+        获取指定阶段的最大迭代次数。
+        
+        Args:
+            stage_number (int): 阶段序号。
+            
+        Returns:
+            int: 最大迭代次数。
+        """
         """Get max iterations for a stage from config or default"""
         return getattr(
             self.cfg.agent.stages,
@@ -177,6 +256,12 @@ class AgentManager:
         )
 
     def _get_task_desc_str(self):
+        """
+        生成格式化的任务描述字符串。
+        
+        Returns:
+            str: 格式化的任务描述。
+        """
         task_desc = """You are an ambitious AI researcher who is looking to publish a paper that will contribute significantly to the field.
 You have an idea and you want to conduct creative experiments to gain scientific insights.
 Your aim is to run experiments to gather sufficient results for a top conference paper.
@@ -198,6 +283,11 @@ Your research idea:\n\n
         return task_desc
 
     def _create_initial_stage(self):
+        """
+        创建初始阶段配置。
+        
+        初始化第一个实验阶段（Initial Implementation），并将其添加到阶段列表和日志中。
+        """
         """Create the initial stage configuration"""
         self.current_stage_number += 1
         initial_stage = Stage(
@@ -214,9 +304,22 @@ Your research idea:\n\n
         self.journals[initial_stage.name] = Journal()
 
     def _curate_task_desc(self, stage: Stage) -> str:
+        """
+        为特定阶段整理任务描述。
+        
+        根据当前阶段（如 Creative Research 或 Ablation Studies），
+        在基础任务描述中添加特定的实验计划或风险因素。
+        
+        Args:
+            stage (Stage): 当前阶段对象。
+            
+        Returns:
+            str: 整理后的任务描述字符串。
+        """
         task_desc = self._get_task_desc_str()
 
         if stage.name.startswith("3_"):
+            # 阶段 3：添加实验计划
             if isinstance(self.task_desc["Experiments"], list):
                 if isinstance(self.task_desc["Experiments"][0], str):
                     experiment_str = "\n".join(self.task_desc["Experiments"])
@@ -236,6 +339,7 @@ Your research idea:\n\n
                 )
             task_desc += "Experiment Plan: " + experiment_str + "\n"
         elif stage.name.startswith("4_"):
+            # 阶段 4：添加风险因素和限制
             if isinstance(self.task_desc["Risk Factors and Limitations"], list):
                 risk_factors_str = "\n".join(
                     self.task_desc["Risk Factors and Limitations"]
@@ -247,6 +351,12 @@ Your research idea:\n\n
         return task_desc
 
     def _save_checkpoint(self):
+        """
+        保存实验的当前状态（Checkpoint）。
+        
+        将当前 AgentManager 的状态（包括日志、历史记录、配置等）序列化保存到磁盘。
+        保存路径为 logs/<run_name>/stage_<stage_name>/checkpoint.pkl。
+        """
         """Save the current state of the experiment"""
         if self.current_stage is None:
             logger.warning("Cannot save checkpoint: current_stage is None")
@@ -272,6 +382,20 @@ Your research idea:\n\n
             pickle.dump(checkpoint, f)
 
     def _create_agent_for_stage(self, stage: Stage) -> ParallelAgent:
+        """
+        为指定阶段创建一个 ParallelAgent 实例。
+        
+        配置 Agent 以执行特定阶段的任务，包括设置任务描述、加载先前阶段的最佳结果等。
+        
+        Args:
+            stage (Stage): 目标阶段配置。
+            
+        Returns:
+            ParallelAgent: 配置好的 Agent 实例。
+            
+        Raises:
+            ValueError: 如果找不到前置阶段的子阶段。
+        """
         """Create a ParallelAgent configured for the given stage"""
         stage_cfg = self.cfg.copy()
         stage_cfg.agent.search.num_drafts = stage.num_drafts
@@ -289,6 +413,7 @@ Your research idea:\n\n
         print("Checking task_desc inside _create_agent_for_stage")
         print(task_desc)
 
+        # 根据当前主阶段，加载前一阶段的最佳节点作为起点
         if main_stage == 2:
             stage1_substages = [s for s in self.stages if s.name.startswith("1_")]
             if not stage1_substages:
@@ -305,6 +430,7 @@ Your research idea:\n\n
             best_stage3_node = None
         elif main_stage == 4:
             # Use the last (sub-)stage's best node
+            # 使用最后一个（子）阶段的最佳节点
             stage3_substages = [s for s in self.stages if s.name.startswith("3_")]
             if stage3_substages:
                 last_substage = stage3_substages[-1]
@@ -329,6 +455,15 @@ Your research idea:\n\n
         )
 
     def _parse_vlm_feedback(self, node: Node) -> str:
+        """
+        解析 VLM (Vision-Language Model) 对节点图表的反馈。
+        
+        Args:
+            node (Node): 需要解析反馈的节点。
+            
+        Returns:
+            str: 格式化后的反馈字符串。
+        """
         """Parse the feedback from the VLM"""
         if len(node.plot_analyses) > 0:
             feedback = f"Plot analyses: {node.plot_analyses[0]['analysis']}\n"
@@ -343,6 +478,18 @@ Your research idea:\n\n
     def _check_substage_completion(
         self, current_substage: Stage, journal: Journal
     ) -> bool:
+        """
+        检查当前子阶段是否完成。
+        
+        通过 LLM 评估最佳节点的图表分析和完成要求，判断是否满足子阶段目标。
+        
+        Args:
+            current_substage (Stage): 当前子阶段对象。
+            journal (Journal): 当前阶段的日志。
+            
+        Returns:
+            Tuple[bool, str]: (是否完成, 原因/反馈信息)。
+        """
         """Check if the current sub-stage is complete"""
         best_node = journal.get_best_node(cfg=self.cfg)
         if not best_node:
@@ -395,6 +542,7 @@ Your research idea:\n\n
             )
 
         # Terminate if max iterations reached
+        # 如果达到最大迭代次数，强制结束
         if len(journal.nodes) >= current_substage.max_iterations:
             logger.info(
                 f"Stage {current_substage.name} completed: reached max iterations"
@@ -408,9 +556,22 @@ Your research idea:\n\n
         return False
 
     def _check_stage_completion(self, stage: Stage) -> bool:
+        """
+        检查当前主要阶段是否完成。
+        
+        根据不同阶段（Initial, Baseline, Creative, Ablation）的具体要求，
+        评估是否满足完成条件。
+        
+        Args:
+            stage (Stage): 当前阶段对象。
+            
+        Returns:
+            Tuple[bool, str]: (是否完成, 原因/反馈信息)。
+        """
         """Check if current stage is complete based on criteria"""
         journal = self.journals[stage.name]
         # Terminate if max iterations reached
+        # 如果达到最大迭代次数，终止阶段
         if len(journal.nodes) >= stage.max_iterations:
             logger.info(f"Stage {stage.name} completed: reached max iterations")
             print(
@@ -419,6 +580,7 @@ Your research idea:\n\n
             if stage.stage_number == 1:
                 # For initial stage, if it didn't even find a working implementation until max iterations,
                 # end gracefully and stop the experiment.
+                # 对于初始阶段，如果达到最大迭代次数仍未找到可行实现，则终止实验
                 logger.error(
                     f"Initial stage {stage.name} did not find a working implementation after {stage.max_iterations} iterations. Consider increasing the max iterations or reducing the complexity of the research idea."
                 )
@@ -431,6 +593,7 @@ Your research idea:\n\n
                 return True, "Reached max iterations"
 
         # For initial stage, complete when we have at least one working implementation
+        # 阶段 1：只要找到至少一个可行实现即视为完成
         if stage.stage_number == 1:
             if len(journal.good_nodes) > 0:
                 logger.info(
@@ -452,6 +615,7 @@ Your research idea:\n\n
                 )
 
             # Normal stage 2 completion check
+            # 阶段 2 常规检查：验证曲线收敛性、数据集测试覆盖率等
             vlm_feedback = self._parse_vlm_feedback(best_node)
             eval_prompt = f"""
             Evaluate if stage 2 (baseline tuning) is complete based on the following evidence:
@@ -509,6 +673,7 @@ Your research idea:\n\n
             # Check if there are enough research results
             # Or, we could just let the agent run until max iterations is reached
             # Check if the experiment execution time is too short
+            # 检查实验执行时间是否过短
             exec_time_minutes = best_node.exec_time / 60
             print(f"[cyan]exec_time_minutes: {exec_time_minutes}[/cyan]")
             if len(self.journals[stage.name].nodes) > (
@@ -530,26 +695,50 @@ Your research idea:\n\n
                     return False, exec_time_feedback
         if stage.stage_number == 4:
             # Just let the agent run until max iterations is reached
+            # 阶段 4：运行直到达到最大迭代次数
             pass
 
         print(f"[green]Stage {stage.name} not completed[/green]")
         return False, "stage not completed"
 
     def _get_best_implementation(self, stage_name: str) -> Optional[Node]:
+        """
+        获取指定阶段的最佳实现节点。
+        
+        Args:
+            stage_name (str): 阶段名称。
+            
+        Returns:
+            Optional[Node]: 最佳节点副本，如果未找到则返回 None。
+        """
         """Get the best implementation from a completed stage"""
         if stage_name not in self.journals:
             return None
         best_node = self.journals[stage_name].get_best_node(cfg=self.cfg)
         if best_node:
             # Create a clean copy of the node for the next stage
+            # 创建节点的干净副本，用于下一阶段
             copied_node = copy.deepcopy(best_node)
             # Reset parent relationship and children
+            # 重置父子关系
             copied_node.parent = None
             copied_node.children = set()
             return copied_node
         return None
 
     def _generate_substage_goal(self, main_stage_goal: str, journal: Journal) -> str:
+        """
+        根据当前的进展生成下一个子阶段的目标。
+        
+        分析当前阶段的指标、问题和进展，使用 LLM 生成具体的改进目标。
+        
+        Args:
+            main_stage_goal (str): 当前主阶段的总目标。
+            journal (Journal): 包含结果和进展的日志。
+            
+        Returns:
+            Tuple[str, str]: (目标描述字符串, 子阶段名称)。
+        """
         """Generate the next sub-stage goal based on what has been done so far.
 
         Args:
@@ -560,6 +749,7 @@ Your research idea:\n\n
             str: Specific goals for the next sub-stage
         """
         # Gather current progress metrics
+        # 收集当前进度指标
         metrics = self._gather_stage_metrics(journal)
         issues = self._identify_issues(journal)
         progress = self._analyze_progress(journal)
@@ -638,6 +828,19 @@ Your research idea:\n\n
     def _create_next_substage(
         self, current_substage: Stage, journal: Journal, substage_feedback: str
     ) -> Optional[Stage]:
+        """
+        创建下一个子阶段。
+        
+        基于当前子阶段的反馈，请求 LLM 生成下一个子阶段的名称和目标。
+        
+        Args:
+            current_substage (Stage): 当前子阶段对象。
+            journal (Journal): 当前阶段的日志。
+            substage_feedback (str): 上一个子阶段的反馈信息。
+            
+        Returns:
+            Optional[Stage]: 新创建的子阶段对象，如果无法创建则返回 None。
+        """
         """Create the next sub-stage. Ask LLM to come up with the next sub-stage name and goals
         based on what has been done so far.
         """
@@ -664,6 +867,18 @@ Your research idea:\n\n
     def _create_next_main_stage(
         self, current_substage: Stage, journal: Journal
     ) -> Optional[Stage]:
+        """
+        创建下一个主要阶段。
+        
+        在当前主要阶段完成后，初始化下一个主要阶段（例如从 Initial Implementation 到 Baseline Tuning）。
+        
+        Args:
+            current_substage (Stage): 当前（刚刚完成的）阶段对象。
+            journal (Journal): 对应的日志。
+            
+        Returns:
+            Optional[Stage]: 下一个主要阶段对象，如果是最后一个阶段则返回 None。
+        """
         (
             main_stage_num,
             main_stage_name,
@@ -690,18 +905,30 @@ Your research idea:\n\n
         )
 
     def run(self, exec_callback, step_callback=None):
+        """
+        运行实验的主循环。
+        
+        协调实验的各个阶段和子阶段的执行，管理 Agent，处理回调和阶段转换。
+        
+        Args:
+            exec_callback (callable): 执行回调函数，用于处理节点的实际执行。
+            step_callback (callable, optional): 步骤回调函数，在每一步执行后调用。
+        """
         """Run the experiment through generated stages"""
         while self.current_stage:  # Main stage loop
+            # 主阶段循环
             main_stage = self.parse_stage_names(self.current_stage.name)[0]
             print(f"[green]Starting main stage: {main_stage}[/green]")
             print(f"[cyan]Goals: {self.current_stage.goals}[/cyan]")
 
             current_substage = self.current_stage
             while current_substage:  # Sub-stage loop
+                # 子阶段循环
                 print(f"[green]Starting sub-stage: {current_substage.name}[/green]")
 
                 with self._create_agent_for_stage(current_substage) as agent:
                     # Initialize with best result from previous sub-stage if available
+                    # 如果有前一个子阶段的最佳结果，则用其初始化
                     if self.stage_history:
                         prev_stage = self.stage_history[-1].from_stage
                         print(f"[cyan]prev_stage: {prev_stage}[/cyan]")
@@ -718,6 +945,7 @@ Your research idea:\n\n
                             break
 
                     # Run until sub-stage completion
+                    # 运行直到子阶段完成
                     while True:
                         agent.step(exec_callback)
                         if step_callback:
@@ -726,6 +954,7 @@ Your research idea:\n\n
                             )
 
                         # First check if main stage is complete
+                        # 首先检查主阶段是否完成
                         (
                             main_stage_complete,
                             main_stage_feedback,
@@ -735,6 +964,7 @@ Your research idea:\n\n
                         )
                         if main_stage_complete:
                             # After main stage completion, run multi-seed eval on the best node
+                            # 主阶段完成后，对最佳节点进行多种子评估
                             if current_substage.stage_number in [1, 2, 3, 4]:
                                 best_node = self._get_best_implementation(
                                     current_substage.name
@@ -766,6 +996,7 @@ Your research idea:\n\n
                                     break
 
                             # Exit the loop to move to next main stage
+                            # 退出循环以进入下一个主阶段
                             current_substage = None
                             break
 
@@ -778,6 +1009,7 @@ Your research idea:\n\n
 
                         if substage_complete:
                             # Create next sub-stage
+                            # 创建下一个子阶段
                             next_substage = self._create_next_substage(
                                 current_substage,
                                 self.journals[current_substage.name],
@@ -785,6 +1017,7 @@ Your research idea:\n\n
                             )
                             if next_substage:
                                 # Record sub-stage transition
+                                # 记录子阶段转换
                                 self.stage_history.append(
                                     StageTransition(
                                         from_stage=current_substage.name,
@@ -795,21 +1028,25 @@ Your research idea:\n\n
                                 )
 
                                 # Setup new sub-stage
+                                # 设置新的子阶段
                                 self.stages.append(next_substage)
                                 self.journals[next_substage.name] = Journal()
                                 current_substage = next_substage
                             else:
                                 # If no next sub-stage could be created, end this main stage
+                                # 如果无法创建下一个子阶段，则结束当前主阶段
                                 current_substage = None
                             break
             self._save_checkpoint()
             # Main stage complete - create next main stage
+            # 主阶段完成 - 创建下一个主阶段
             if self.current_stage:
                 next_main_stage = self._create_next_main_stage(
                     self.stages[-1], self.journals[self.stages[-1].name]
                 )
                 if next_main_stage:
                     # Record main stage transition
+                    # 记录主阶段转换
                     self.stage_history.append(
                         StageTransition(
                             from_stage=self.stages[-1].name,
@@ -824,6 +1061,7 @@ Your research idea:\n\n
                     self.current_stage = next_main_stage
                 else:
                     # Exit the outer loop if no more main stages
+                    # 如果没有更多主阶段，退出外层循环
                     logger.info(f"Completed stage: {self.current_stage.name}")
                     logger.info("No more stages to run -- exiting the loop...")
                     self.current_stage = None
@@ -834,6 +1072,20 @@ Your research idea:\n\n
         previous_results: Optional[Dict[str, Any]],
         is_initial_stage: bool,
     ) -> str:
+        """
+        创建详细的阶段分析提示词，用于确定下一个阶段的配置。
+        
+        该函数会汇总之前的阶段信息、结果、指标、问题和可视化分析，
+        生成一个全面的提示词，供 LLM 分析并决策下一步。
+        
+        Args:
+            previous_stages (List[Stage]): 之前的阶段列表。
+            previous_results (Optional[Dict[str, Any]]): 之前的结果数据。
+            is_initial_stage (bool): 是否是初始阶段。
+            
+        Returns:
+            str: 生成的分析提示词。
+        """
         """Create detailed prompt to determine next stage configuration"""
         prompt_parts = [
             f"Task Description: {self._curate_task_desc(previous_stages[-1])}",
@@ -849,6 +1101,7 @@ Your research idea:\n\n
 
         if previous_results:
             # Format node summaries
+            # 格式化节点摘要
             if "node_summaries" in previous_results["metrics"]:
                 summaries = "\n".join(
                     f"Node {i}: {summary}"
@@ -859,6 +1112,7 @@ Your research idea:\n\n
                 prompt_parts.append(f"Node Analysis:\n{summaries}")
 
             # Format VLM feedback and plot analysis
+            # 格式化 VLM 反馈和图表分析
             if "plot_insights" in previous_results:
                 plot_insights = previous_results["plot_insights"]
                 prompt_parts.append("Visual Analysis Findings:")
@@ -866,6 +1120,7 @@ Your research idea:\n\n
                     prompt_parts.append(f"- {analysis['analysis']}")
 
             # Format other metrics and findings
+            # 格式化其他指标和发现
             metrics_summary = (
                 f"Progress Summary:\n"
                 f"- Total attempts: {previous_results['metrics']['total_nodes']}\n"
@@ -878,6 +1133,7 @@ Your research idea:\n\n
             prompt_parts.append(metrics_summary)
 
             # Save stage transition analysis to notes directory
+            # 将阶段转换分析保存到 notes 目录
             base_dir = Path(self.workspace_dir).parent.parent
             run_name = Path(self.workspace_dir).name
             notes_dir = (
@@ -925,17 +1181,31 @@ Your research idea:\n\n
         return "\n\n".join(prompt_parts)
 
     def parse_stage_names(self, stage_name: str) -> Tuple[int, str, int, str]:
+        """
+        解析阶段名称字符串。
+        
+        将形如 "1_initial_implementation_1_preliminary" 的名称解析为组件。
+        
+        Args:
+            stage_name (str): 完整的阶段名称。
+            
+        Returns:
+            Tuple[int, str, int, str]: (主阶段号, 主阶段名, 子阶段号, 子阶段名)。
+        """
         """Parse stage name into main stage number, main stage name,
         sub-stage number, and sub-stage name"""
         # Find the two numbers in the current stage name
+        # 在当前阶段名称中找到两个数字
         numbers = [int(n) for n in re.findall(r"\d+", stage_name)]
 
         main_stage = numbers[0]
         sub_stage_num = numbers[1]
         # Extract main_stage_name (everything between the two numbers)
+        # 提取 main_stage_name（两个数字之间的所有内容）
         parts = re.split(r"\d+", stage_name)[1:-1]
         main_stage_name = "_".join(p.strip("_") for p in parts if p.strip("_"))
         # Extract sub_stage_name (everything after the second number)
+        # 提取 sub_stage_name（第二个数字之后的所有内容）
         sub_stage_name = re.split(r"\d+", stage_name)[-1].strip("_")
 
         return main_stage, main_stage_name, sub_stage_num, sub_stage_name
@@ -943,6 +1213,16 @@ Your research idea:\n\n
     def _save_stage_summary(
         self, current_results: Dict[str, Any], evaluation: Dict[str, Any]
     ):
+        """
+        保存阶段完成摘要。
+        
+        将阶段的最终指标、发现的问题、进度分析和评估结果保存为 JSON 文件。
+        保存路径：logs/<run_name>/notes/stage_<stage_number>_complete/stage_completion_summary.json。
+        
+        Args:
+            current_results (Dict[str, Any]): 当前阶段的运行结果。
+            evaluation (Dict[str, Any]): 阶段评估结果。
+        """
         """Save comprehensive stage completion summary"""
         base_dir = Path(self.workspace_dir).parent.parent
         run_name = Path(self.workspace_dir).name
@@ -976,6 +1256,15 @@ Your research idea:\n\n
             json.dump(completion_data, f, indent=2)
 
     def _get_response(self, prompt: str) -> Dict[str, Any]:
+        """
+        获取 LLM 对阶段配置的响应。
+        
+        Args:
+            prompt (str): 发送给 LLM 的分析提示词。
+            
+        Returns:
+            Dict[str, Any]: 包含阶段配置的字典（名称、描述、目标等）。
+        """
         """Get structured response from LLM for stage configuration.
 
         Args:
@@ -1030,6 +1319,7 @@ Your research idea:\n\n
         except Exception as e:
             logger.error(f"Error getting LLM response: {e}")
             # Provide a fallback configuration in case of errors
+            # 发生错误时提供回退配置
             return {
                 "name": "fallback_stage",
                 "description": "Fallback stage due to LLM error",
@@ -1039,6 +1329,15 @@ Your research idea:\n\n
             }
 
     def _gather_stage_metrics(self, journal: Journal) -> Dict[str, Any]:
+        """
+        收集当前阶段的详细指标和分析。
+        
+        Args:
+            journal (Journal): 包含节点信息的日志。
+            
+        Returns:
+            Dict[str, Any]: 包含总节点数、成功/失败节点数、最佳指标、VLM 反馈等信息的字典。
+        """
         """Gather detailed metrics and analysis from the stage's nodes"""
         metrics = {
             "total_nodes": len(journal.nodes),
@@ -1050,12 +1349,14 @@ Your research idea:\n\n
         }
 
         # Gather individual node summaries
+        # 收集单个节点摘要
         for node in journal.nodes:
             if hasattr(node, "_agent"):
                 node_summary = node._agent._generate_node_summary(node)
                 metrics["node_summaries"].append(node_summary)
 
         # Get VLM feedback from plot analysis
+        # 获取图表分析中的 VLM 反馈
         for node in journal.good_nodes:
             if hasattr(node, "_vlm_feedback"):
                 metrics["vlm_feedback"].append(node._vlm_feedback)
@@ -1082,28 +1383,43 @@ Your research idea:\n\n
         return metrics
 
     def _identify_issues(self, journal: Journal) -> List[str]:
+        """
+        识别当前阶段结果中的系统性问题和挑战。
+        
+        Args:
+            journal (Journal): 当前阶段日志。
+            
+        Returns:
+            List[str]: 识别出的问题列表。
+        """
         """Identify systemic issues and challenges from the current stage's results"""
         issues = []
 
         # Look for patterns in leaf nodes (endpoints of improvement attempts)
+        # 在叶节点中寻找模式（改进尝试的终点）
         leaf_nodes = [n for n in journal.nodes if n.is_leaf]
         buggy_leaves = [n for n in leaf_nodes if n.is_buggy]
 
         # If we have buggy leaf nodes, it means we couldn't fix some issues
+        # 如果存在有缺陷的叶节点，说明有些问题未能修复
         if buggy_leaves:
             # Group similar issues
+            # 对相似问题进行分组
             error_patterns = {}
             for node in buggy_leaves:
                 if hasattr(node, "analysis"):
                     # Use the error message as key to group similar issues
+                    # 使用错误消息作为键来分组
                     error_patterns.setdefault(node.analysis, []).append(node.id)
 
             # Report persistent issues
+            # 报告持久性问题
             for error_msg, node_ids in error_patterns.items():
                 if len(node_ids) >= 2:  # If same error occurs multiple times
                     issues.append(f"Persistent issue in nodes {node_ids}: {error_msg}")
 
         # Include VLM-identified systemic issues
+        # 包含 VLM 识别出的系统性问题
         vlm_issues = set()  # Use set to avoid duplicate issues
         for node in journal.good_nodes:
             if hasattr(node, "_vlm_feedback"):
@@ -1125,6 +1441,15 @@ Your research idea:\n\n
         return issues
 
     def _analyze_progress(self, journal: Journal) -> Dict[str, Any]:
+        """
+        分析当前阶段的进展和收敛情况。
+        
+        Args:
+            journal (Journal): 当前阶段日志。
+            
+        Returns:
+            Dict[str, Any]: 包含迭代次数、改进趋势、近期变化等信息的字典。
+        """
         """Analyze progress and convergence in the current stage"""
         progress = {
             "iterations_completed": len(journal.nodes),
@@ -1135,6 +1460,7 @@ Your research idea:\n\n
         }
 
         # Analyze recent changes
+        # 分析最近的变化
         recent_nodes = journal.nodes[-3:] if len(journal.nodes) >= 3 else journal.nodes
         for node in recent_nodes:
             if not node.is_buggy:
@@ -1151,6 +1477,16 @@ Your research idea:\n\n
     def _evaluate_stage_progression(
         self, current_stage: Stage, previous_results: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """
+        评估是否准备好进入下一个实验阶段。
+        
+        Args:
+            current_stage (Stage): 当前阶段对象。
+            previous_results (Dict[str, Any]): 当前阶段的运行结果。
+            
+        Returns:
+            Dict[str, Any]: 评估结果，包括是否准备好进入下一阶段、原因、建议等。
+        """
         """Evaluate whether experiment is ready for next stage"""
 
         eval_prompt = f"""
@@ -1202,6 +1538,7 @@ Your research idea:\n\n
             )
 
             # Log the evaluation for transparency
+            # 记录评估结果以保持透明度
             logger.info(
                 f"Stage progression evaluation:\n{json.dumps(evaluation, indent=2)}"
             )

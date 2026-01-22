@@ -134,6 +134,23 @@ def generate_temp_free_idea(
     num_reflections: int = 5,
     reload_ideas: bool = True,
 ) -> List[Dict]:
+    """
+    生成开放式研究创意的主函数。
+
+    通过多轮对话和工具调用（如文献搜索），引导 LLM 生成、反思并最终确定研究提案。
+
+    Args:
+        idea_fname (str): 保存生成的创意的文件路径（JSON 格式）。
+        client (Any): LLM 客户端实例。
+        model (str): 使用的 LLM 模型名称。
+        workshop_description (str): 研讨会或研究主题的描述，作为生成创意的背景。
+        max_num_generations (int): 最大尝试生成的创意数量。默认为 20。
+        num_reflections (int): 每个创意生成过程中的反思迭代次数。默认为 5。
+        reload_ideas (bool): 是否从现有文件中重新加载已生成的创意。默认为 True。
+
+    Returns:
+        List[Dict]: 生成的所有创意列表。
+    """
     idea_str_archive = []
     # load ideas from file
     if reload_ideas and osp.exists(idea_fname):

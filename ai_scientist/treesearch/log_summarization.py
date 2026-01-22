@@ -1,3 +1,21 @@
+"""
+日志摘要模块
+============
+
+本模块负责对实验日志进行总结和分析。
+利用 LLM 对不同阶段（Draft, Baseline, Research, Ablation）的实验结果进行聚合、对比和总结，
+生成具有科学价值的见解报告。
+
+主要功能：
+- 节点信息提取：从 Journal 节点中提取关键信息（计划、分析、指标、图表等）。
+- 阶段摘要生成：使用 LLM 生成特定阶段的实验摘要。
+- 历史记录标注：为节点标注其父节点的计划和当前计划的综合摘要。
+- 整体摘要生成：并行处理所有阶段的日志，生成最终的实验报告。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import json
 import os
 import sys
@@ -10,6 +28,7 @@ from ai_scientist.llm import get_response_from_llm, extract_json_between_markers
 from ai_scientist.treesearch.backend import get_ai_client
 
 
+# 报告摘要生成器的系统消息
 report_summarizer_sys_msg = """You are an expert machine learning researcher.
 You are given multiple experiment logs, each representing a node in a stage of exploring scientific ideas and implementations.
 Your task is to aggregate these logs and provide scientifically insightful information.
@@ -20,6 +39,7 @@ Important instructions:
 - Identify notable insights or differences across the nodes without repeating the same information.
 """
 
+# 输出格式控制指令
 output_format_control = """Respond in the following format:
 
 THOUGHT:
@@ -47,6 +67,7 @@ In <JSON>, provide the review in JSON format with the following fields in exactl
 
 Ensure the JSON is valid and properly formatted, as it will be automatically parsed."""
 
+# 报告摘要生成提示词模板
 report_summarizer_prompt = (
     """You are given multiple experiment logs from different "nodes". Each node represents attempts and experiments exploring various scientific ideas.
 
@@ -63,6 +84,7 @@ Here are the experiment logs of the nodes:
     + output_format_control
 )
 
+# 阶段聚合提示词模板
 stage_aggregate_prompt = """You are given:
 
 1) The summary of all previous experiment stages:
@@ -107,6 +129,17 @@ Ensure the JSON is valid and properly formatted, as it will be automatically par
 
 
 def get_nodes_infos(nodes):
+    """
+    获取节点的详细信息字符串。
+
+    格式化节点的主要信息，包括计划、分析、数值结果和绘图分析，用于构建 LLM 提示词。
+
+    Args:
+        nodes (List[Node]): 节点列表。
+
+    Returns:
+        str: 格式化的节点信息字符串。
+    """
     node_infos = ""
     for n in nodes:
         node_info = f"Node ID: {n.id}\n"
@@ -136,6 +169,18 @@ def get_nodes_infos(nodes):
 
 
 def get_summarizer_prompt(journal, stage_name):
+    """
+    生成摘要生成器的提示词。
+
+    选择好的叶子节点，并使用 get_nodes_infos 格式化其信息，构建完整的提示词。
+
+    Args:
+        journal (Journal): 实验日志。
+        stage_name (str): 阶段名称。
+
+    Returns:
+        tuple: (系统消息, 完整提示词)。
+    """
     good_leaf_nodes = [n for n in journal.good_nodes if n.is_leaf]
     if not good_leaf_nodes:
         print("NO GOOD LEAF NODES!!!")
@@ -147,6 +192,20 @@ def get_summarizer_prompt(journal, stage_name):
 
 
 def get_stage_summary(journal, stage_name, model, client):
+    """
+    获取指定阶段的实验摘要。
+
+    调用 LLM 生成摘要并解析 JSON 结果。
+
+    Args:
+        journal (Journal): 实验日志。
+        stage_name (str): 阶段名称。
+        model (str): 使用的 LLM 模型名称。
+        client: LLM 客户端实例。
+
+    Returns:
+        dict: 解析后的摘要 JSON 对象。
+    """
     sys_msg, prompt = get_summarizer_prompt(journal, stage_name)
     response = get_response_from_llm(prompt, client, model, sys_msg)
     summary_json = extract_json_between_markers(response[0])
@@ -154,6 +213,17 @@ def get_stage_summary(journal, stage_name, model, client):
 
 
 def get_node_log(node):
+    """
+    获取节点的日志信息字典。
+
+    提取节点中与日志记录和分析相关的关键字段，处理结果目录路径。
+
+    Args:
+        node (Node): 实验节点。
+
+    Returns:
+        dict: 包含关键信息的字典。
+    """
     node_dict = node.to_dict()
     # Only include keys that are relevant for logging/analysis
     keys_to_include = [
@@ -198,6 +268,26 @@ def get_node_log(node):
 def update_summary(
     prev_summary, cur_stage_name, cur_journal, cur_summary, model, client, max_retry=5
 ):
+    """
+    更新实验总体摘要。
+
+    将当前阶段的摘要与之前的摘要合并，生成更新后的综合摘要。
+
+    Args:
+        prev_summary (str): 之前的总体摘要。
+        cur_stage_name (str): 当前阶段名称。
+        cur_journal (Journal): 当前阶段的实验日志。
+        cur_summary (str): 当前阶段的摘要。
+        model (str): 使用的 LLM 模型名称。
+        client: LLM 客户端实例。
+        max_retry (int, optional): 最大重试次数。默认为 5。
+
+    Returns:
+        dict: 更新后的摘要 JSON 对象。
+
+    Raises:
+        Exception: 如果在多次重试后仍无法生成摘要。
+    """
     good_leaf_nodes = [n for n in cur_journal.good_nodes if n.is_leaf]
     node_infos = get_nodes_infos(good_leaf_nodes)
     prompt = stage_aggregate_prompt.format(
@@ -229,6 +319,7 @@ def update_summary(
     return summary_json
 
 
+# 总体计划摘要提示词模板
 overall_plan_summarizer_prompt = """You have been provided with the plans for both the parent node and the current node. Your task is to synthesize a comprehensive summary of the overall plan by integrating details from both the parent and current node plans.
 The summary should be thorough and clearly articulate the underlying motivations.
 For example, if in your previous overall plan you were experimenting with a new idea, and now your current plan is to fix certain bugs in the previous implementation, your returned overall plan should focus on your previous overall plan, and briefly mention that the current plan includes bug fixes. If your current plan is more about implementing new ideas, then you should summarize that thoroughly along with the previous overall plan.
@@ -260,6 +351,15 @@ Ensure the JSON is valid and properly formatted, as it will be automatically par
 
 
 def annotate_history(journal, cfg=None):
+    """
+    为日志中的节点标注历史计划摘要。
+
+    遍历日志中的节点，使用 LLM 将其计划与父节点的计划进行综合，生成 overall_plan。
+
+    Args:
+        journal (Journal): 实验日志。
+        cfg (Config, optional): 配置对象。
+    """
     for node in journal.nodes:
         if node.parent:
             max_retries = 3
@@ -297,9 +397,24 @@ def annotate_history(journal, cfg=None):
 
 
 def overall_summarize(journals, cfg=None):
+    """
+    生成所有实验阶段的综合摘要。
+
+    并行处理每个阶段的日志，生成 Draft, Baseline, Research, Ablation 四个部分的摘要。
+
+    Args:
+        journals (List[Tuple[str, Journal]]): 包含 (阶段名, 日志) 元组的列表。
+        cfg (Config, optional): 配置对象。
+
+    Returns:
+        tuple: (draft_summary, baseline_summary, research_summary, ablation_summary)
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     def process_stage(idx, stage_tuple):
+        """
+        处理单个阶段的日志。
+        """
         stage_name, journal = stage_tuple
         annotate_history(journal, cfg=cfg)
         if idx in [1, 2]:
@@ -367,13 +482,13 @@ if __name__ == "__main__":
 
     def load_stage_folders(base_path):
         """
-        Load the folders that start with 'stage_' followed by a number.
+        加载以 'stage_' 开头并后跟数字的文件夹。
 
         Args:
-            base_path (str): The base directory path where stage folders are located.
+            base_path (str): 阶段文件夹所在的基础目录路径。
 
         Returns:
-            list: A sorted list of stage folder paths.
+            list: 排序后的阶段文件夹路径列表。
         """
         stage_folders = []
         for folder_name in os.listdir(base_path):
@@ -382,6 +497,17 @@ if __name__ == "__main__":
         return sorted(stage_folders, key=lambda x: int(x.split("_")[1]))
 
     def reconstruct_journal(journal_data):
+        """
+        根据 JSON 数据重构 Journal 对象。
+
+        恢复节点之间的父子关系。
+
+        Args:
+            journal_data (dict): 包含 'nodes' 和 'node2parent' 的字典数据。
+
+        Returns:
+            Journal: 重构后的 Journal 对象。
+        """
         # Create a mapping of node IDs to Node instances
         id_to_node = {}
         for node_data in journal_data["nodes"]:

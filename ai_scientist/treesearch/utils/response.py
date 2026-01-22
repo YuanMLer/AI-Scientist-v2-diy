@@ -84,7 +84,15 @@ def extract_text_up_to_code(s):
 
 
 def format_code(code) -> str:
-    """Format Python code using Black."""
+    """
+    使用 Black 格式化 Python 代码。
+
+    Args:
+        code (str): 待格式化的 Python 代码。
+
+    Returns:
+        str: 格式化后的代码。如果格式化失败，则返回原代码。
+    """
     try:
         return black.format_str(code, mode=black.FileMode())
     except black.parsing.InvalidInput:  # type: ignore

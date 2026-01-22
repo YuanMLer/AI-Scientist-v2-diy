@@ -1,3 +1,20 @@
+"""
+VLM 论文评审模块
+================
+
+本模块利用视觉语言模型 (VLM) 对论文中的图表、标题和正文引用进行详细评审。
+支持从 PDF 中提取图表截图、提取摘要、生成图表评审报告以及检测重复图表。
+
+主要功能：
+1. extract_figure_screenshots: 从 PDF 中提取图表截图及其上下文引用。
+2. perform_imgs_cap_ref_review: 对论文中的图表进行图文一致性评审。
+3. detect_duplicate_figures: 检测论文中是否存在重复或高度相似的图表。
+4. perform_imgs_cap_ref_review_selection: 在页面限制下评审图表的价值和保留必要性。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import os
 import hashlib
 import pymupdf
@@ -13,7 +30,18 @@ from ai_scientist.perform_llm_review import load_paper
 
 
 def encode_image_to_base64(image_data):
-    """Encode image data to base64 string."""
+    """
+    将图像数据编码为 Base64 字符串。
+
+    Args:
+        image_data (Union[str, list, bytes]): 图像数据。可以是文件路径、包含字节的列表或字节对象。
+
+    Returns:
+        str: 编码后的 Base64 字符串。
+
+    Raises:
+        TypeError: 如果图像数据类型不支持。
+    """
     if isinstance(image_data, str):
         with open(image_data, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode("utf-8")
@@ -448,6 +476,19 @@ def detect_duplicate_figures(client, client_model, pdf_path):
 def generate_vlm_img_selection_review(
     img, abstract, model, client, reflection_page_info
 ):
+    """
+    生成针对图表选择的评审意见，评估其是否应保留在有限篇幅的论文中。
+
+    Args:
+        img (Dict): 包含图表信息的字典。
+        abstract (str): 论文摘要。
+        model (str): VLM 模型名称。
+        client (Any): LLM/VLM 客户端实例。
+        reflection_page_info (str): 关于当前页面限制和内容的反射信息。
+
+    Returns:
+        Dict: VLM 返回的 JSON 格式评审结果，包含对图表价值和是否保留的建议。
+    """
     prompt = img_cap_selection_prompt.format(
         abstract=abstract,
         caption=img["caption"],
@@ -464,6 +505,18 @@ def generate_vlm_img_selection_review(
 def perform_imgs_cap_ref_review_selection(
     client, client_model, pdf_path, reflection_page_info
 ):
+    """
+    对 PDF 中的图表执行选择性评审，判断其在页面限制下的保留价值。
+
+    Args:
+        client (Any): LLM/VLM 客户端实例。
+        client_model (str): 模型名称。
+        pdf_path (str): PDF 文件路径。
+        reflection_page_info (str): 关于当前页面限制和内容的反射信息。
+
+    Returns:
+        Dict[str, Dict]: 包含每个图表选择性评审结果的字典。
+    """
     paper_txt = load_paper(pdf_path)
     img_folder_path = os.path.join(
         os.path.dirname(pdf_path),

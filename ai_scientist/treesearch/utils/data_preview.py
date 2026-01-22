@@ -1,8 +1,22 @@
 """
-Contains functions to manually generate a textual preview of some common file types (.csv, .json,..) for the agent.
+数据预览工具模块
+================
+
+本模块提供了用于生成文件和目录预览的功能。
+支持计算文件大小、生成目录树结构以及预览 CSV 文件内容。
+帮助 Agent 快速了解文件系统结构和数据内容。
+
+主要功能：
+1. get_file_len_size: 计算文件行数或字节大小。
+2. file_tree: 生成指定目录的树状结构字符串。
+3. preview_csv: 读取并预览 CSV 文件的前几行。
+
+作者: AI Scientist Team
+日期: 2025-01-22
 """
 
 import json
+import os
 from pathlib import Path
 
 import humanize
@@ -18,8 +32,16 @@ plaintext_files = {".txt", ".csv", ".json", ".tsv"} | code_files
 
 def get_file_len_size(f: Path) -> tuple[int, str]:
     """
-    Calculate the size of a file (#lines for plaintext files, otherwise #bytes)
-    Also returns a human-readable string representation of the size.
+    计算文件大小。
+
+    对于文本文件，计算行数；对于其他文件，计算字节数。
+    同时返回人类可读的大小描述。
+
+    Args:
+        f (Path): 文件路径。
+
+    Returns:
+        tuple[int, str]: (大小数值, 人类可读的大小字符串)。
     """
     if f.suffix in plaintext_files:
         num_lines = sum(1 for _ in open(f))
@@ -30,7 +52,18 @@ def get_file_len_size(f: Path) -> tuple[int, str]:
 
 
 def file_tree(path: Path, depth=0) -> str:
-    """Generate a tree structure of files in a directory"""
+    """
+    生成目录的文件树结构。
+
+    递归地列出目录下的文件和子目录，限制显示的文件数量以保持简洁。
+
+    Args:
+        path (Path): 目录路径。
+        depth (int, optional): 当前递归深度。默认为 0。
+
+    Returns:
+        str: 文件树结构的字符串表示。
+    """
     result = []
     files = [p for p in Path(path).iterdir() if not p.is_dir()]
     dirs = [p for p in Path(path).iterdir() if p.is_dir()]
@@ -48,7 +81,17 @@ def file_tree(path: Path, depth=0) -> str:
 
 
 def _walk(path: Path):
-    """Recursively walk a directory (analogous to os.walk but for pathlib.Path)"""
+    """
+    递归遍历目录。
+
+    类似于 os.walk，但针对 pathlib.Path 对象。
+
+    Args:
+        path (Path): 要遍历的目录路径。
+
+    Yields:
+        Path: 遍历到的文件或目录路径。
+    """
     for p in sorted(Path(path).iterdir()):
         if p.is_dir():
             yield from _walk(p)
@@ -57,15 +100,18 @@ def _walk(path: Path):
 
 
 def preview_csv(p: Path, file_name: str, simple=True) -> str:
-    """Generate a textual preview of a csv file
+    """
+    生成 CSV 文件的文本预览。
+
+    读取 CSV 文件并生成关于其结构和内容的摘要信息。
 
     Args:
-        p (Path): the path to the csv file
-        file_name (str): the file name to use in the preview
-        simple (bool, optional): whether to use a simplified version of the preview. Defaults to True.
+        p (Path): CSV 文件路径。
+        file_name (str): 在预览中显示的文件名。
+        simple (bool, optional): 是否使用简化版预览（仅列名）。默认为 True。
 
     Returns:
-        str: the textual preview
+        str: 文本预览内容。
     """
     df = pd.read_csv(p)
 

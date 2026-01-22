@@ -1,3 +1,20 @@
+"""
+LLM 评审模块
+============
+
+本模块利用 LLM 对生成的论文进行评审，模拟同行评审过程。
+支持单次评审、集成评审（Ensemble Review）和元评审（Meta-Review）。
+使用 NeurIPS 等顶级会议的评审标准。
+
+主要功能：
+1. perform_review: 执行完整的评审流程。
+2. get_batch_responses_from_llm: 批量获取 LLM 响应（用于集成评审）。
+3. extract_json_between_markers: 提取评审结果 JSON。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import os
 import json
 import numpy as np

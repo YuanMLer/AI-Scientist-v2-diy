@@ -1,3 +1,19 @@
+"""
+TreeSearch 工具函数模块
+=======================
+
+提供文件系统操作和数据集预处理的通用工具函数。
+主要用于复制目录、清理数据集（移除 macOS 临时文件）、解压归档文件等。
+
+主要功能：
+1. copytree: 增强版的目录复制函数，支持合并目录和符号链接。
+2. clean_up_dataset: 清理数据集中的无关文件（如 __MACOSX, .DS_Store）。
+3. extract_archives: 递归解压目录中的所有 .zip 文件并清理。
+4. preproc_data: 数据预处理流程（解压 + 清理）。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
 import logging
 import shutil
 import zipfile
@@ -48,9 +64,15 @@ def clean_up_dataset(path: Path):
 
 def extract_archives(path: Path):
     """
-    unzips all .zip files within `path` and cleans up task dir
+    解压路径下所有的 .zip 文件并清理任务目录。
 
-    [TODO] handle nested zips
+    遍历目录中的 zip 文件进行解压，处理嵌套目录结构，并删除原始 zip 文件。
+    如果目标目录已存在，则跳过解压。
+
+    [TODO] 处理嵌套的 zip 文件。
+
+    Args:
+        path (Path): 要处理的目录路径。
     """
     for zip_f in path.rglob("*.zip"):
         f_out_dir = zip_f.with_suffix("")
@@ -96,5 +118,13 @@ def extract_archives(path: Path):
 
 
 def preproc_data(path: Path):
+    """
+    数据预处理流程。
+
+    依次执行解压归档文件和清理数据集操作。
+
+    Args:
+        path (Path): 要处理的数据目录路径。
+    """
     extract_archives(path)
     clean_up_dataset(path)

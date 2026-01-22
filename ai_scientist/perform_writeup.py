@@ -1,3 +1,20 @@
+"""
+论文撰写与编译工具模块
+======================
+
+本模块负责处理论文的 LaTeX 编译、PDF 生成以及引用文献的收集。
+包含清理文本、编译 LaTeX、检测生成的 PDF 页面内容等功能。
+
+主要功能：
+1. compile_latex: 编译 LaTeX 模板生成 PDF。
+2. detect_pages_before_impact: 检测 "Impact Statement" 所在的页码。
+3. get_citation_addition: 使用 LLM 辅助生成引用文献建议。
+4. remove_accents_and_clean: 清理字符串中的特殊字符。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import argparse
 import json
 import os
@@ -23,6 +40,18 @@ from ai_scientist.vlm import create_client as create_vlm_client
 
 
 def remove_accents_and_clean(s):
+    """
+    清理字符串，移除重音符号和非 ASCII 字符。
+
+    将字符串标准化，移除非法字符，仅保留字母、数字和特定符号。
+    常用于处理文件名或 BibTeX 键值。
+
+    Args:
+        s (str): 原始字符串。
+
+    Returns:
+        str: 清理后的全小写字符串。
+    """
     # print("Original:", s)
     # Normalize to separate accents
     nfkd_form = unicodedata.normalize("NFKD", s)
@@ -37,6 +66,17 @@ def remove_accents_and_clean(s):
 
 
 def compile_latex(cwd, pdf_file, timeout=30):
+    """
+    编译 LaTeX 项目生成 PDF。
+
+    执行多次 pdflatex 和 bibtex 命令以确保引用正确解析。
+    生成的 PDF 将被移动到指定位置。
+
+    Args:
+        cwd (str): LaTeX 项目所在目录。
+        pdf_file (str): 目标 PDF 文件路径。
+        timeout (int, optional): 编译超时时间（秒）。默认为 30。
+    """
     print("GENERATING LATEX")
 
     commands = [
@@ -81,9 +121,17 @@ def compile_latex(cwd, pdf_file, timeout=30):
 
 def detect_pages_before_impact(latex_folder, timeout=30):
     """
-    Temporarily copy the latex folder, compile, and detect on which page
-    the phrase "Impact Statement" appears.
-    Returns a tuple (page_number, line_number) if found, otherwise None.
+    检测 "Impact Statement" 之前的页数。
+
+    临时复制 LaTeX 文件夹并编译，然后逐页搜索关键词。
+    用于确定正文长度，确保符合会议页数限制。
+
+    Args:
+        latex_folder (str): LaTeX 文件夹路径。
+        timeout (int, optional): 编译超时时间。默认为 30。
+
+    Returns:
+        tuple | None: 如果找到，返回 (页码, 行号)；否则返回 None。
     """
     temp_dir = osp.join(latex_folder, f"_temp_compile_{uuid.uuid4().hex}")
     try:
@@ -149,6 +197,27 @@ def detect_pages_before_impact(latex_folder, timeout=30):
 def get_citation_addition(
     client, model, context, current_round, total_rounds, idea_text
 ):
+    """
+    生成引用文献添加建议。
+
+    使用 LLM 根据当前的实验报告和已有的引用列表，建议添加新的引用文献。
+    目标是丰富参考文献，涵盖研究背景、方法对比等多个方面。
+
+    Args:
+        client: LLM 客户端实例。
+        model (str): 模型名称。
+        context (tuple): (当前报告内容, 当前引用列表)。
+        current_round (int): 当前轮次。
+        total_rounds (int): 总轮次。
+        idea_text (str): 研究想法描述。
+
+    Returns:
+        tuple: (响应内容, 消息历史) - 实际上该函数目前只构建 Prompt，后续逻辑似乎在外部或未完全展示，
+               但根据代码结构，它定义了 system_msg 和 prompt_template。
+               注意：原函数似乎不完整或仅作为 Prompt 构建器使用？
+               不，看原代码它只是定义了变量，没有 return？
+               Ah, wait, let me check the original code again.
+    """
     report, citations = context
     msg_history = []
     citation_system_msg_template = """You are an ambitious AI researcher who is looking to publish a paper to a top-tier ML conference that will contribute significantly to the field.

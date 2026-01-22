@@ -1,3 +1,20 @@
+"""
+配置加载模块
+============
+
+本模块负责加载项目配置和设置环境变量。
+使用 OmegaConf 处理 YAML 配置文件，并支持 .env 文件加载。
+
+主要功能：
+1. setup_environment: 自动从 .env 文件加载环境变量。
+2. load_config: 从 YAML 文件加载配置。
+3. get_config: 获取全局配置对象（单例模式）。
+4. get_llm_config: 获取特定 LLM 模型的配置。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import os
 import sys
 from omegaconf import OmegaConf
@@ -14,7 +31,10 @@ _CONFIG = None
 
 def setup_environment():
     """
-    Load environment variables from .env file automatically.
+    设置环境变量。
+
+    自动加载 .env 文件中的环境变量。
+    如果文件不存在，将记录警告并使用系统环境变量。
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env_path = os.path.join(project_root, ".env")
@@ -37,14 +57,18 @@ setup_environment()
 
 def load_config(config_path=None):
     """
-    Load the project configuration from a YAML file.
-    
+    加载配置文件。
+
     Args:
-        config_path (str, optional): Path to the configuration file. 
-                                     If None, defaults to 'bfts_config.yaml' in the project root.
-    
+        config_path (str, optional): 配置文件路径。
+                                     如果为 None，默认为项目根目录下的 'bfts_config.yaml'。
+
     Returns:
-        OmegaConf: The loaded configuration object.
+        OmegaConf: 加载的配置对象。
+
+    Raises:
+        FileNotFoundError: 如果配置文件不存在。
+        RuntimeError: 如果加载配置文件失败。
     """
     global _CONFIG
     
@@ -71,7 +95,12 @@ def load_config(config_path=None):
 
 def get_config():
     """
-    Get the cached configuration object. Loads it if not already loaded.
+    获取全局配置对象。
+
+    如果尚未加载配置，则尝试加载默认配置。
+
+    Returns:
+        OmegaConf: 配置对象。
     """
     global _CONFIG
     if _CONFIG is None:
@@ -80,13 +109,16 @@ def get_config():
 
 def get_llm_config(model_name=None):
     """
-    Helper to get LLM configuration for a specific model.
-    
+    获取特定 LLM 模型的配置。
+
     Args:
-        model_name (str, optional): The model name. If None, uses the default model from config.
-        
+        model_name (str, optional): 模型名称。如果为 None，则使用配置中的默认模型。
+
     Returns:
-        dict: The configuration dictionary for the model.
+        dict: 模型配置字典。
+
+    Raises:
+        ValueError: 如果未提供模型名称且未配置默认模型，或者模型在配置中未定义。
     """
     config = get_config()
     llm_config = config.get("llm_config", {})

@@ -1,3 +1,19 @@
+"""
+指标值定义模块
+==============
+
+本模块定义了用于评估实验结果的指标值类。
+支持数值、字典等多种类型的指标值，并实现了自定义的比较逻辑。
+MetricValue 类支持比较运算符，便于在搜索算法中进行优胜劣汰。
+
+主要类：
+1. MetricValue_old: 旧版指标值类（已废弃）。
+2. MetricValue: 通用指标值类，支持最大化/最小化目标。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 from dataclasses import dataclass, field
 from functools import total_ordering
 from typing import Any
@@ -10,8 +26,16 @@ from dataclasses_json import DataClassJsonMixin
 @total_ordering
 class MetricValue_old(DataClassJsonMixin):
     """
-    Represents the value of a metric to be optimized, which can be compared to other metric values.
-    Comparisons (and max, min) are based on which value is better, not which is larger.
+    指标值类 (旧版)。
+
+    表示一个需要优化的指标值，可以与其他指标值进行比较。
+    比较逻辑基于哪个值"更好"，而不仅仅是哪个值更大。
+
+    Args:
+        value (float | int | np.number | np.floating | np.ndarray | dict | None): 指标值。
+        maximize (bool | None, optional): 是否最大化该指标。默认为 None。
+        name (str | None, optional): 指标名称（如 "accuracy", "loss"）。默认为 None。
+        description (str | None, optional): 指标描述。默认为 None。
     """
 
     value: float | int | np.number | np.floating | np.ndarray | dict | None
@@ -32,7 +56,17 @@ class MetricValue_old(DataClassJsonMixin):
                 self.value = float(self.value)
 
     def __gt__(self, other) -> bool:
-        """True if self is a _better_ (not necessarily larger) metric value than other"""
+        """
+        判断当前指标是否比另一个指标"更好"。
+
+        注意：这里的比较不仅仅是数值大小，还取决于 maximize 属性。
+
+        Args:
+            other (MetricValue_old): 另一个指标对象。
+
+        Returns:
+            bool: 如果当前指标更好则返回 True。
+        """
         if self.value is None:
             return False
         if other.value is None:
@@ -81,11 +115,16 @@ class MetricValue_old(DataClassJsonMixin):
 
     @property
     def is_worst(self):
-        """True if the metric value is the worst possible value."""
+        """
+        判断是否为最差值（None）。
+        """
         return self.value is None
 
     @property
     def value_npsafe(self):
+        """
+        获取安全的数值（将 None 转换为 NaN）。
+        """
         if self.value is None:
             return float("nan")
         if isinstance(self.value, dict):
@@ -95,7 +134,15 @@ class MetricValue_old(DataClassJsonMixin):
         return self.value
 
     def get_dataset_value(self, dataset_name: str) -> float | None:
-        """Get the metric value for a specific dataset"""
+        """
+        获取特定数据集的指标值。
+
+        Args:
+            dataset_name (str): 数据集名称。
+
+        Returns:
+            float | None: 指标值。
+        """
         if isinstance(self.value, dict):
             return self.value.get(dataset_name)
         return None

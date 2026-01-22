@@ -1,10 +1,28 @@
-"""Export journal to HTML visualization of tree + code."""
+"""
+树结构导出工具模块
+==================
+
+本模块负责将实验记录（Journal）导出为可视化的树状结构。
+使用 igraph 库生成节点布局，并支持生成 HTML 可视化页面。
+主要用于实验过程和结果的可视化展示。
+
+主要功能：
+1. get_edges: 从配置字典中提取图的边。
+2. generate_layout: 使用 igraph 生成树状布局。
+3. normalize_layout: 归一化布局坐标到 [0, 1] 区间。
+4. cfg_to_tree_struct: 将配置转换为树结构数据。
+5. generate: 生成 HTML 可视化页面。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
 
 import json
 import textwrap
 from pathlib import Path
 
 import numpy as np
+import igraph
 from igraph import Graph
 from ..journal import Journal
 
@@ -12,13 +30,34 @@ from rich import print
 
 
 def get_edges(journal: Journal):
+    """
+    获取日志中所有节点的边（父子关系）。
+
+    Args:
+        journal (Journal): 实验日志对象。
+
+    Yields:
+        tuple: (父节点步骤, 子节点步骤) 的元组。
+    """
     for node in journal:
         for c in node.children:
             yield (node.step, c.step)
 
 
 def generate_layout(n_nodes, edges, layout_type="rt"):
-    """Generate visual layout of graph"""
+    """
+    生成图的视觉布局。
+
+    使用 igraph 库根据节点和边生成布局坐标。
+
+    Args:
+        n_nodes (int): 节点数量。
+        edges (list): 边列表。
+        layout_type (str, optional): 布局类型。默认为 "rt" (Reingold-Tilford 树布局)。
+
+    Returns:
+        np.ndarray: 节点坐标数组。
+    """
     layout = Graph(
         n_nodes,
         edges=edges,
@@ -32,7 +71,15 @@ def generate_layout(n_nodes, edges, layout_type="rt"):
 
 
 def normalize_layout(layout: np.ndarray):
-    """Normalize layout to [0, 1]"""
+    """
+    将布局坐标归一化到 [0, 1] 区间。
+
+    Args:
+        layout (np.ndarray): 原始布局坐标。
+
+    Returns:
+        np.ndarray: 归一化后的布局坐标。
+    """
     layout = (layout - layout.min(axis=0)) / (layout.max(axis=0) - layout.min(axis=0))
     layout[:, 1] = 1 - layout[:, 1]
     layout[:, 1] = np.nan_to_num(layout[:, 1], nan=0)
@@ -42,11 +89,15 @@ def normalize_layout(layout: np.ndarray):
 
 def get_completed_stages(log_dir):
     """
-    Determine completed stages by checking for the existence of stage directories
-    that contain evidence of completion (tree_data.json, tree_plot.html, or journal.json).
+    确定已完成的实验阶段。
+
+    通过检查阶段目录下是否存在 completion evidence (tree_data.json, tree_plot.html, or journal.json) 来判断。
+
+    Args:
+        log_dir (Path): 日志根目录。
 
     Returns:
-        list: A list of stage names (e.g., ["Stage_1", "Stage_2"])
+        list: 已完成阶段的名称列表 (例如 ["Stage_1", "Stage_2"])。
     """
     completed_stages = []
 
@@ -74,6 +125,19 @@ def get_completed_stages(log_dir):
 
 
 def cfg_to_tree_struct(cfg, jou: Journal, out_path: Path = None):
+    """
+    将配置和日志转换为树结构数据。
+
+    计算布局，提取节点信息（ID, 代码, 评分, 指标等），并准备用于可视化的数据结构。
+
+    Args:
+        cfg (Config): 实验配置。
+        jou (Journal): 实验日志。
+        out_path (Path, optional): 输出路径。如果提供，将数据保存为 JSON。
+
+    Returns:
+        dict: 包含树结构数据的字典。
+    """
     edges = list(get_edges(jou))
     print(f"[red]Edges: {edges}[/red]")
     try:

@@ -1,3 +1,18 @@
+"""
+Anthropic 后端模块
+==================
+
+本模块提供了与 Anthropic API (通过 Bedrock 或直接调用) 交互的功能。
+用于发送聊天请求并获取响应，支持 Claude 模型。
+
+主要功能：
+1. get_ai_client: 获取 Anthropic 客户端实例。
+2. query: 向 Anthropic 模型发送请求，处理系统消息和用户消息。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import time
 import os
 
@@ -16,6 +31,18 @@ ANTHROPIC_TIMEOUT_EXCEPTIONS = (
 )
 
 def get_ai_client(model : str, max_retries=2) -> anthropic.AnthropicBedrock:
+    """
+    获取 Anthropic 客户端实例。
+
+    目前配置为使用 AnthropicBedrock 客户端。
+
+    Args:
+        model (str): 模型名称（此处未使用，但保留以保持接口一致性）。
+        max_retries (int, optional): 最大重试次数。默认为 2。
+
+    Returns:
+        anthropic.AnthropicBedrock: Anthropic Bedrock 客户端实例。
+    """
     client = anthropic.AnthropicBedrock(max_retries=max_retries)
     return client
 
@@ -25,6 +52,29 @@ def query(
     func_spec: FunctionSpec | None = None,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
+    """
+    向 Anthropic 模型发送查询请求。
+
+    处理消息格式（Anthropic 将 system 消息作为独立参数），支持自动重试。
+    目前不支持函数调用 (Function Calling)。
+
+    Args:
+        system_message (str | None): 系统消息内容。
+        user_message (str | None): 用户消息内容。
+        func_spec (FunctionSpec | None, optional): 函数规范。Anthropic 后端暂不支持，若提供将抛出 NotImplementedError。
+        **model_kwargs: 传递给 API 的其他参数（如 model, temperature, max_tokens 等）。
+
+    Returns:
+        tuple: 包含以下元素的元组：
+            - OutputType: 模型响应内容（字符串）。
+            - float: 请求耗时（秒）。
+            - int: 输入 Token 数量。
+            - int: 输出 Token 数量。
+            - dict: 包含响应元数据的字典（停止原因）。
+
+    Raises:
+        NotImplementedError: 如果提供了 func_spec。
+    """
     client = get_ai_client(model_kwargs.get("model"), max_retries=0)
 
     filtered_kwargs: dict = select_values(notnone, model_kwargs)  # type: ignore

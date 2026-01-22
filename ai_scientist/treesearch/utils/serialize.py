@@ -1,3 +1,21 @@
+"""
+序列化工具模块
+==============
+
+本模块提供了对象（特别是 Journal 和 Node）的 JSON 序列化和反序列化功能。
+处理自定义 Dataclasses 的转换，并管理节点间的父子关系引用。
+
+主要功能：
+1. dumps_json: 将对象序列化为 JSON 字符串。
+2. dump_json: 将对象序列化并保存到文件。
+3. loads_json: 从 JSON 字符串反序列化为对象。
+4. load_json: 从文件读取并反序列化为对象。
+5. parse_markdown_to_dict: 从 Markdown 内容中解析键值对字典。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import copy
 import json
 from pathlib import Path
@@ -9,7 +27,17 @@ from ..journal import Journal, Node
 
 
 def dumps_json(obj: dataclasses_json.DataClassJsonMixin):
-    """Serialize dataclasses (such as Journals) to JSON."""
+    """
+    将 Dataclasses（如 Journal）序列化为 JSON 字符串。
+
+    处理 Journal 对象中的循环引用（节点父子关系），将其转换为 ID 引用。
+
+    Args:
+        obj (dataclasses_json.DataClassJsonMixin): 要序列化的对象。
+
+    Returns:
+        str: JSON 字符串。
+    """
     if isinstance(obj, Journal):
         obj = copy.deepcopy(obj)
         node2parent = {}
@@ -32,6 +60,13 @@ def dumps_json(obj: dataclasses_json.DataClassJsonMixin):
 
 
 def dump_json(obj: dataclasses_json.DataClassJsonMixin, path: Path):
+    """
+    将对象序列化并保存到 JSON 文件。
+
+    Args:
+        obj (dataclasses_json.DataClassJsonMixin): 要序列化的对象。
+        path (Path): 目标文件路径。
+    """
     with open(path, "w") as f:
         f.write(dumps_json(obj))
 
@@ -40,7 +75,18 @@ G = TypeVar("G", bound=dataclasses_json.DataClassJsonMixin)
 
 
 def loads_json(s: str, cls: Type[G]) -> G:
-    """Deserialize JSON to AIDE dataclasses."""
+    """
+    将 JSON 字符串反序列化为 AIDE Dataclasses。
+
+    如果是 Journal 对象，还会重建节点间的父子关系。
+
+    Args:
+        s (str): JSON 字符串。
+        cls (Type[G]): 目标类。
+
+    Returns:
+        G: 反序列化后的对象实例。
+    """
     obj_dict = json.loads(s)
     obj = cls.from_dict(obj_dict)
 
@@ -53,19 +99,31 @@ def loads_json(s: str, cls: Type[G]) -> G:
 
 
 def load_json(path: Path, cls: Type[G]) -> G:
+    """
+    从 JSON 文件加载并反序列化对象。
+
+    Args:
+        path (Path): JSON 文件路径。
+        cls (Type[G]): 目标类。
+
+    Returns:
+        G: 反序列化后的对象实例。
+    """
     with open(path, "r") as f:
         return loads_json(f.read(), cls)
 
 
 def parse_markdown_to_dict(content: str):
     """
-    Reads a file that contains lines of the form:
+    解析类似 JSON 的 Markdown 内容为字典。
 
-        "Key": "Value",
-        "Another Key": "Another Value",
-        ...
+    读取包含 "Key": "Value" 格式行的文件内容，支持多行值。
 
-    including possible multi-line values, and returns a Python dictionary.
+    Args:
+        content (str): Markdown 文本内容。
+
+    Returns:
+        dict: 解析出的字典。
     """
 
     pattern = r'"([^"]+)"\s*:\s*"([^"]*?)"(?:,\s*|\s*$)'

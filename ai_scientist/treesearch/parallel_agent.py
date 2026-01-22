@@ -1,3 +1,25 @@
+"""
+并行代理 (Parallel Agent)
+=======================
+
+本模块实现了支持并行执行的 AI 科学家代理。
+它利用多进程和 GPU 管理来加速实验的搜索和评估过程。
+
+主要组件：
+1. ParallelAgent: 主代理类，负责管理进程池、GPU 资源分配和整个搜索树的并行扩展。
+2. MinimalAgent: 轻量级代理类，在工作进程中运行，负责具体的节点处理（如生成代码、执行实验、分析结果）。
+3. GPUManager: 简单的 GPU 资源管理器，负责分配和释放 GPU。
+
+主要功能：
+- 并行节点处理：同时评估多个实验节点。
+- GPU 资源调度：动态分配 GPU 给工作进程。
+- 多种子评估：支持对同一实验进行多种子重复运行以验证稳定性。
+- 阶段感知：根据实验阶段（Stage 1-4）调整搜索策略（如超参数调优、消融实验）。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 from concurrent.futures import ProcessPoolExecutor
 from typing import List, Optional, Set, Any, Callable, cast, Dict, Tuple
 import random
@@ -29,7 +51,16 @@ ExecCallbackType = Callable[[str, bool], ExecutionResult]
 
 
 def _safe_pickle_test(obj, name="object"):
-    """Test if an object can be pickled"""
+    """
+    测试对象是否可以被序列化 (pickled)。
+
+    Args:
+        obj: 要测试的对象。
+        name (str, optional): 对象名称，用于错误日志。默认为 "object"。
+
+    Returns:
+        bool: 如果对象可以被序列化则返回 True，否则返回 False。
+    """
     try:
         pickle.dumps(obj)
         return True
@@ -41,7 +72,18 @@ def _safe_pickle_test(obj, name="object"):
 def _parse_keyword_prefix_response(
     response: str, keyword_prefix1: str, keyword_prefix2: str
 ) -> Tuple[Optional[str], Optional[str]]:
-    """Parse the response into name and description based on keyword prefix"""
+    """
+    基于关键字前缀解析响应内容。
+    用于从 LLM 响应中提取特定字段（如名称和描述）。
+
+    Args:
+        response (str): LLM 的响应文本。
+        keyword_prefix1 (str): 第一个字段的关键字前缀。
+        keyword_prefix2 (str): 第二个字段的关键字前缀。
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: 解析出的两个字段内容。如果解析失败则返回 None。
+    """
     try:
         # Split response into lines and clean up
         lines = [line.strip() for line in response.split("\n") if line.strip()]
@@ -221,9 +263,20 @@ plot_selection_spec = FunctionSpec(
 
 
 class AblationConfig:
-    """Track state of ablation experiments"""
+    """
+    跟踪消融实验的状态。
+    """
 
     def __init__(self, name: str, description: str, code: str, base_node: Node):
+        """
+        初始化 AblationConfig。
+
+        Args:
+            name (str): 消融实验名称。
+            description (str): 消融实验描述。
+            code (str): 消融实验代码。
+            base_node (Node): 基线节点。
+        """
         self.name = name
         self.description = description
         self.code = code
@@ -236,23 +289,46 @@ class AblationConfig:
 
 
 class AblationIdea:
-    """Ablation idea"""
+    """
+    消融实验想法。
+    """
 
     def __init__(self, name: str, description: str):
+        """
+        初始化 AblationIdea。
+
+        Args:
+            name (str): 想法名称。
+            description (str): 想法描述。
+        """
         self.name = name
         self.description = description
 
 
 class HyperparamTuningIdea:
-    """Hyperparameter tuning idea"""
+    """
+    超参数调优想法。
+    """
 
     def __init__(self, name: str, description: str):
+        """
+        初始化 HyperparamTuningIdea。
+
+        Args:
+            name (str): 想法名称。
+            description (str): 想法描述。
+        """
         self.name = name
         self.description = description
 
 
 class MinimalAgent:
-    """A minimal agent class that only contains what's needed for processing nodes"""
+    """
+    轻量级代理类。
+    
+    仅包含处理单个节点所需的功能，设计用于在工作进程中运行。
+    它负责具体的代码生成、调试、改进和结果解析。
+    """
 
     def __init__(
         self,
@@ -263,6 +339,17 @@ class MinimalAgent:
         stage=None,
         stage_name=None,
     ):
+        """
+        初始化 MinimalAgent。
+
+        Args:
+            task_desc (str): 任务描述。
+            cfg (Config): 配置对象。
+            memory_summary (str, optional): 记忆摘要。默认为 None。
+            evaluation_metrics (str, optional): 评估指标定义。默认为 None。
+            stage (str, optional): 实验阶段（已弃用，使用 stage_name）。默认为 None。
+            stage_name (str, optional): 当前实验阶段名称。默认为 None。
+        """
         self.task_desc = task_desc
         self.memory_summary = memory_summary
         self.cfg = cfg
@@ -272,6 +359,14 @@ class MinimalAgent:
 
     @property
     def _prompt_environment(self):
+        """
+        生成环境相关的提示信息。
+
+        指定可用的机器学习包和环境建议。
+
+        Returns:
+            dict: 包含环境提示信息的字典。
+        """
         pkgs = [
             "numpy",
             "pandas",
@@ -296,6 +391,14 @@ class MinimalAgent:
 
     @property
     def _prompt_impl_guideline(self):
+        """
+        生成实现指南相关的提示信息。
+
+        包括 GPU 使用、数据处理、代码结构、结果保存等关键要求。
+
+        Returns:
+            dict: 包含实现指南提示信息的字典。
+        """
         impl_guideline = [
             "CRITICAL GPU REQUIREMENTS - Your code MUST include ALL of these:",
             "  - At the start of your code, add these lines to handle GPU/CPU:",
@@ -395,6 +498,14 @@ class MinimalAgent:
 
     @property
     def _prompt_resp_fmt(self):
+        """
+        生成响应格式提示信息。
+
+        要求 LLM 返回自然语言概述和 Python 代码块。
+
+        Returns:
+            dict: 包含响应格式提示信息的字典。
+        """
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (7-10 sentences), "
@@ -405,6 +516,14 @@ class MinimalAgent:
         }
 
     def _prompt_metricparse_resp_fmt(self):
+        """
+        生成指标解析响应格式提示信息。
+
+        要求 LLM 返回指标解析的自然语言概述和 Python 代码块。
+
+        Returns:
+            dict: 包含指标解析响应格式提示信息的字典。
+        """
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
@@ -416,6 +535,14 @@ class MinimalAgent:
 
     @property
     def _prompt_debug_resp_fmt(self):
+        """
+        生成调试响应格式提示信息。
+
+        要求 LLM 返回调试方案概述和包含修复的 Python 代码块。
+
+        Returns:
+            dict: 包含调试响应格式提示信息的字典。
+        """
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
@@ -428,6 +555,14 @@ class MinimalAgent:
 
     @property
     def _prompt_hyperparam_tuning_resp_fmt(self):
+        """
+        生成超参数调优响应格式提示信息。
+
+        要求 LLM 返回调优方案概述和包含调优逻辑的 Python 代码块。
+
+        Returns:
+            dict: 包含超参数调优响应格式提示信息的字典。
+        """
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
@@ -440,6 +575,14 @@ class MinimalAgent:
 
     @property
     def _prompt_ablation_resp_fmt(self):
+        """
+        生成消融实验响应格式提示信息。
+
+        要求 LLM 返回消融实验方案概述和包含消融逻辑的 Python 代码块。
+
+        Returns:
+            dict: 包含消融实验响应格式提示信息的字典。
+        """
         return {
             "Response format": (
                 "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
@@ -451,6 +594,14 @@ class MinimalAgent:
         }
 
     def _draft(self) -> Node:
+        """
+        生成初始实验方案和代码 (Drafting)。
+
+        根据任务描述和记忆摘要，使用 LLM 生成初始的实验计划和代码。
+
+        Returns:
+            Node: 包含生成的计划和代码的新节点。
+        """
         prompt: Any = {
             "Introduction": (
                 "You are an AI researcher who is looking to publish a paper that will contribute significantly to the field."
@@ -492,6 +643,17 @@ class MinimalAgent:
         return Node(plan=plan, code=code)
 
     def _debug(self, parent_node: Node) -> Node:
+        """
+        修复实验代码中的错误 (Debugging)。
+
+        根据之前的错误信息和执行日志，使用 LLM 生成修复后的代码。
+
+        Args:
+            parent_node (Node): 包含错误代码的父节点。
+
+        Returns:
+            Node: 包含修复后代码的新节点。
+        """
         prompt: Any = {
             "Introduction": (
                 "You are an experienced AI researcher. Your previous code for research experiment had a bug, so based on the information below, you should revise it in order to fix this bug. "
@@ -521,6 +683,17 @@ class MinimalAgent:
         return Node(plan=plan, code=code, parent=parent_node)
 
     def _improve(self, parent_node: Node) -> Node:
+        """
+        改进实验代码 (Improving)。
+
+        基于现有的实验结果，使用 LLM 生成改进后的代码。
+
+        Args:
+            parent_node (Node): 需要改进的父节点。
+
+        Returns:
+            Node: 包含改进后代码的新节点。
+        """
         prompt: Any = {
             "Introduction": (
                 "You are an experienced AI researcher. You are provided with a previously developed "
@@ -547,6 +720,17 @@ class MinimalAgent:
         )
 
     def _generate_seed_node(self, parent_node: Node):
+        """
+        生成种子节点。
+
+        标记节点为种子节点，以便在后续评估中使用不同的随机种子进行重复运行。
+
+        Args:
+            parent_node (Node): 父节点。
+
+        Returns:
+            Node: 标记为种子节点的新节点。
+        """
         return Node(
             plan="Seed node",
             code=parent_node.code,
@@ -557,6 +741,18 @@ class MinimalAgent:
     def _generate_hyperparam_tuning_node(
         self, parent_node: Node, hyperparam_idea: HyperparamTuningIdea
     ):
+        """
+        生成超参数调优节点。
+
+        使用 LLM 根据调优想法修改父节点代码。
+
+        Args:
+            parent_node (Node): 父节点。
+            hyperparam_idea (HyperparamTuningIdea): 调优想法。
+
+        Returns:
+            Node: 包含调优后代码的新节点。
+        """
         prompt: Any = {
             "Introduction": (
                 "You are an experienced AI researcher. You are provided with a previously developed "
@@ -603,6 +799,18 @@ class MinimalAgent:
         )
 
     def _generate_ablation_node(self, parent_node: Node, ablation_idea: AblationIdea):
+        """
+        生成消融实验节点。
+
+        使用 LLM 根据消融想法修改父节点代码。
+
+        Args:
+            parent_node (Node): 父节点。
+            ablation_idea (AblationIdea): 消融想法。
+
+        Returns:
+            Node: 包含消融实验代码的新节点。
+        """
         prompt: Any = {
             "Introduction": (
                 "You are an experienced AI researcher. You are provided with a previously developed "
@@ -656,7 +864,18 @@ class MinimalAgent:
         )
 
     def plan_and_code_query(self, prompt, retries=3) -> tuple[str, str]:
-        """Generate a natural language plan + code in the same LLM call and split them apart."""
+        """
+        执行 LLM 查询以生成计划和代码。
+        
+        在一个 LLM 调用中同时获取自然语言计划和代码块，并将其分离。
+
+        Args:
+            prompt (dict): 发送给 LLM 的提示。
+            retries (int, optional): 重试次数。默认为 3。
+
+        Returns:
+            tuple[str, str]: (计划文本, 代码字符串)。如果失败则返回空字符串。
+        """
         completion_text = None
         for _ in range(retries):
             completion_text = query(
@@ -683,6 +902,16 @@ class MinimalAgent:
     def parse_exec_result(
         self, node: Node, exec_result: ExecutionResult, workspace: str
     ):
+        """
+        解析执行结果并更新节点。
+
+        分析执行输出，检查错误，提取指标，并使用 LLM 生成总结。
+
+        Args:
+            node (Node): 当前节点。
+            exec_result (ExecutionResult): 执行结果。
+            workspace (str): 工作目录路径。
+        """
         logger.info(f"Agent is parsing execution results for node {node.id}")
 
         node.absorb_exec_result(exec_result)
@@ -720,7 +949,19 @@ class MinimalAgent:
     def _generate_plotting_code(
         self, node: Node, working_dir: str, plot_code_from_prev_stage: str = None
     ) -> str:
-        """Generate code for plotting experiment results"""
+        """
+        生成实验结果绘图代码。
+
+        生成用于可视化 experiment_data.npy 中数据的 Python 代码。
+
+        Args:
+            node (Node): 当前节点，包含实验代码。
+            working_dir (str): 工作目录。
+            plot_code_from_prev_stage (str, optional): 上一阶段的绘图代码（用于参考）。默认为 None。
+
+        Returns:
+            str: 生成的绘图代码。
+        """
         prompt_guideline = [
             "AVAILABLE DATA: ",
             "Experiment Data: experiment_data.npy",
@@ -833,7 +1074,17 @@ class MinimalAgent:
         return code
 
     def _determine_datasets_successfully_tested(self, node: Node) -> List[str]:
-        """Determine which datasets are successfully tested based on VLM feedback"""
+        """
+        根据 VLM 反馈确定哪些数据集测试成功。
+
+        分析 VLM 的绘图分析结果，判断哪些数据集的实验成功生成了有效结果。
+
+        Args:
+            node (Node): 当前节点。
+
+        Returns:
+            List[str]: 成功测试的数据集名称列表。如果无，返回 [""]。
+        """
         plot_analyses = ""
         for i, plot_analysis in enumerate(node.plot_analyses):
             plot_analyses += f"plot {i+1}: {plot_analysis['analysis']}\n"
@@ -892,7 +1143,15 @@ class MinimalAgent:
         return [""]
 
     def _analyze_plots_with_vlm(self, node: Node) -> None:
-        """Analyze experimental plots using VLM"""
+        """
+        使用 VLM (Vision Language Model) 分析实验绘图。
+
+        对实验生成的图表进行视觉分析，生成反馈摘要。
+        如果图表数量过多，会先筛选最相关的图表。
+
+        Args:
+            node (Node): 当前节点，包含图表路径。
+        """
         if not node.plot_paths:
             return
 
@@ -1033,7 +1292,17 @@ class MinimalAgent:
         )
 
     def _generate_node_summary(self, node: Node) -> dict:
-        """Generate a summary of the node's experimental findings"""
+        """
+        生成节点实验结果的总结。
+
+        使用 LLM 分析实验结果、代码、输出、绘图分析等，生成关键发现、重要性和下一步建议。
+
+        Args:
+            node (Node): 需要总结的节点。
+
+        Returns:
+            dict: 包含总结结果的字典（findings, significance, next_steps）。
+        """
         summary_prompt = {
             "Introduction": (
                 "You are an AI researcher analyzing experimental results. "
@@ -1089,15 +1358,36 @@ class MinimalAgent:
 
 
 class GPUManager:
-    """Manages GPU allocation across processes"""
+    """
+    GPU 资源管理器。
+
+    管理进程间的 GPU 分配和释放。
+    """
 
     def __init__(self, num_gpus: int):
+        """
+        初始化 GPU 管理器。
+
+        Args:
+            num_gpus (int): 可用的 GPU 数量。
+        """
         self.num_gpus = num_gpus
         self.available_gpus: Set[int] = set(range(num_gpus))
         self.gpu_assignments: Dict[str, int] = {}  # process_id -> gpu_id
 
     def acquire_gpu(self, process_id: str) -> int:
-        """Assigns a GPU to a process"""
+        """
+        为进程分配一个 GPU。
+
+        Args:
+            process_id (str): 进程 ID。
+
+        Returns:
+            int: 分配的 GPU ID。
+
+        Raises:
+            RuntimeError: 如果没有可用的 GPU。
+        """
         if not self.available_gpus:
             raise RuntimeError("No GPUs available")
         print(f"Available GPUs: {self.available_gpus}")
@@ -1110,7 +1400,12 @@ class GPUManager:
         return gpu_id
 
     def release_gpu(self, process_id: str):
-        """Releases GPU assigned to a process"""
+        """
+        释放分配给进程的 GPU。
+
+        Args:
+            process_id (str): 进程 ID。
+        """
         if process_id in self.gpu_assignments:
             gpu_id = self.gpu_assignments[process_id]
             self.available_gpus.add(gpu_id)
@@ -1118,7 +1413,14 @@ class GPUManager:
 
 
 def get_gpu_count() -> int:
-    """Get number of available NVIDIA GPUs without using torch"""
+    """
+    获取可用的 NVIDIA GPU 数量。
+
+    不使用 torch，尝试使用 nvidia-smi 或 CUDA_VISIBLE_DEVICES 环境变量。
+
+    Returns:
+        int: GPU 数量。
+    """
     try:
         # First try using nvidia-smi
         nvidia_smi = subprocess.run(
@@ -1140,6 +1442,12 @@ def get_gpu_count() -> int:
 
 
 class ParallelAgent:
+    """
+    并行实验代理。
+
+    负责管理和执行并行实验任务，包括 GPU 分配、多进程执行、结果收集等。
+    """
+
     def __init__(
         self,
         task_desc: str,
@@ -1150,6 +1458,18 @@ class ParallelAgent:
         best_stage2_node=None,
         best_stage1_node=None,
     ):
+        """
+        初始化并行代理。
+
+        Args:
+            task_desc (str): 任务描述。
+            cfg (Config): 配置对象。
+            journal (Journal): 实验日志。
+            stage_name (str, optional): 当前阶段名称。
+            best_stage3_node (Node, optional): 第三阶段最佳节点（用于消融研究初始化）。
+            best_stage2_node (Node, optional): 第二阶段最佳节点（用于绘图代码初始化）。
+            best_stage1_node (Node, optional): 第一阶段最佳节点（用于超参数调优初始化）。
+        """
         super().__init__()
         self.task_desc = task_desc
         self.cfg = cfg
@@ -1192,7 +1512,14 @@ class ParallelAgent:
         }
 
     def _define_global_metrics(self) -> str:
-        """Define eval metric to be used across all experiments"""
+        """
+        定义全局评估指标。
+
+        使用 LLM 为所有实验定义统一的评估指标。
+
+        Returns:
+            str: 评估指标的 JSON 字符串描述。
+        """
         prompt = {
             "Introduction": (
                 "You are an AI researcher setting up experiments. "
@@ -1222,7 +1549,18 @@ class ParallelAgent:
         return response
 
     def plan_and_code_query(self, prompt, retries=3) -> tuple[str, str]:
-        """Generate a natural language plan + code in the same LLM call and split them apart."""
+        """
+        执行 LLM 查询以生成计划和代码。
+        
+        在一个 LLM 调用中同时获取自然语言计划和代码块，并将其分离。
+
+        Args:
+            prompt (dict): 发送给 LLM 的提示。
+            retries (int, optional): 重试次数。默认为 3。
+
+        Returns:
+            tuple[str, str]: (计划文本, 代码字符串)。如果失败则返回空字符串。
+        """
         completion_text = None
         for _ in range(retries):
             completion_text = query(
@@ -1248,7 +1586,16 @@ class ParallelAgent:
     def _generate_seed_eval_aggregation_node(
         self, node: Node, agg_plotting_code: str
     ) -> Node:
-        """Generate a special aggregation node for seed evaluation results"""
+        """
+        生成种子评估结果的聚合节点。
+
+        Args:
+            node (Node): 父节点。
+            agg_plotting_code (str): 聚合绘图代码。
+
+        Returns:
+            Node: 聚合节点。
+        """
         return Node(
             plan="Aggregate results from multiple seeds",
             code="# plotting aggregation code",
@@ -1259,9 +1606,17 @@ class ParallelAgent:
         )
 
     def _run_multi_seed_evaluation(self, node: Node) -> List[Node]:
-        """Run multiple seeds of the same node to get statistical metrics.
-        Returns a list of nodes with different random seeds."""
+        """
+        运行多种子评估。
 
+        使用不同的随机种子运行同一节点的代码，以获取统计指标。
+
+        Args:
+            node (Node): 要评估的节点。
+
+        Returns:
+            List[Node]: 包含不同随机种子结果的节点列表。
+        """
         # Convert node to dict for parallel processing
         node_data = node.to_dict()
         node_code = node.code
@@ -1330,7 +1685,16 @@ class ParallelAgent:
         return seed_nodes
 
     def _run_plot_aggregation(self, node: Node, seed_nodes: List[Node]) -> Node:
-        """Generate an aggregation node for seed evaluation results"""
+        """
+        生成种子评估结果的聚合节点。
+
+        Args:
+            node (Node): 父节点。
+            seed_nodes (List[Node]): 种子节点列表。
+
+        Returns:
+            Node: 聚合节点。
+        """
         if seed_nodes:
             try:
                 from .interpreter import Interpreter
@@ -1422,7 +1786,30 @@ class ParallelAgent:
         best_stage1_plot_code=None,
         seed_eval=False,
     ):
-        """Wrapper function that creates a fresh environment for each process"""
+        """
+        处理节点的包装函数。
+
+        为每个进程创建一个新的环境（Interpreter, WorkerAgent），执行节点代码，并处理结果。
+        这是一个静态方法，以便于 multiprocessing 序列化。
+
+        Args:
+            node_data (dict): 节点数据的字典表示。
+            task_desc (str): 任务描述。
+            cfg (Config): 配置对象。
+            gpu_id (int, optional): 分配的 GPU ID。默认为 None。
+            memory_summary (str, optional): 记忆摘要。默认为 None。
+            evaluation_metrics (str, optional): 评估指标定义。默认为 None。
+            stage_name (str, optional): 阶段名称。默认为 None。
+            new_ablation_idea (AblationIdea, optional): 新的消融想法。默认为 None。
+            new_hyperparam_idea (HyperparamTuningIdea, optional): 新的超参数调优想法。默认为 None。
+            best_stage3_plot_code (str, optional): 最佳阶段 3 绘图代码。默认为 None。
+            best_stage2_plot_code (str, optional): 最佳阶段 2 绘图代码。默认为 None。
+            best_stage1_plot_code (str, optional): 最佳阶段 1 绘图代码。默认为 None。
+            seed_eval (bool, optional): 是否为种子评估。默认为 False。
+
+        Returns:
+            dict: 处理后的节点数据的字典表示。
+        """
         from .interpreter import Interpreter
         from .journal import Node, Journal
         from copy import deepcopy
@@ -1796,8 +2183,13 @@ class ParallelAgent:
             raise
 
     def _generate_hyperparam_tuning_idea(self) -> Optional[HyperparamTuningIdea]:
-        """Generate the next hyperparam tuning idea based on what's been done.
-        This is minaly for Stage 2 (baseline tuning).
+        """
+        生成下一个超参数调优想法。
+
+        主要用于第二阶段（基线调优），基于已尝试的超参数生成新的调优建议。
+
+        Returns:
+            Optional[HyperparamTuningIdea]: 新的超参数调优想法，如果没有更多想法则返回 None。
         """
         tried = list(self._hyperparam_tuning_state["tried_hyperparams"])
 
@@ -1858,7 +2250,14 @@ class ParallelAgent:
         )
 
     def _generate_ablation_idea(self) -> Optional[AblationIdea]:
-        """Generate the next ablation idea based on what's been done"""
+        """
+        生成下一个消融实验想法。
+
+        基于已完成的实验，生成新的消融研究建议。
+
+        Returns:
+            Optional[AblationIdea]: 新的消融想法。
+        """
 
         # Prepare context of what's been tried
         completed = list(self._ablation_state["completed_ablations"])
@@ -1919,7 +2318,15 @@ class ParallelAgent:
         return AblationIdea(name="add one more layer", description="add one more layer")
 
     def _get_leaves(self, node: Node) -> List[Node]:
-        """Get all leaf nodes in the subtree rooted at node."""
+        """
+        获取以指定节点为根的子树中的所有叶子节点。
+
+        Args:
+            node (Node): 根节点。
+
+        Returns:
+            List[Node]: 叶子节点列表。
+        """
         if not node.children:
             return [node]
 
@@ -1929,15 +2336,18 @@ class ParallelAgent:
         return leaves
 
     def _select_parallel_nodes(self) -> List[Optional[Node]]:
-        """Select N nodes to process in parallel,
-        balancing between tree exploration and exploitation.
-        Note:
-        - This function runs in the main process.
-        Some design considerations:
-        - For Stage 2 and 4, we generate nodes in the main process and
-        send them to worker processes.
-        This is to make sure we don't run duplicate ideas in parallel.
-        - For Stage 1 and 3, we generate nodes in worker processes.
+        """
+        选择 N 个节点进行并行处理。
+
+        在树的探索（exploration）和利用（exploitation）之间进行平衡。
+
+        注意:
+        - 此函数在主进程中运行。
+        - 对于阶段 2 和 4，我们在主进程中生成节点并发送给工作进程，以避免重复运行相同的想法。
+        - 对于阶段 1 和 3，我们在工作进程中生成节点。
+
+        Returns:
+            List[Optional[Node]]: 选定的节点列表。None 表示生成新的草稿节点。
         """
         nodes_to_process = []
         processed_trees = set()
@@ -2051,6 +2461,14 @@ class ParallelAgent:
         return nodes_to_process
 
     def step(self, exec_callback: ExecCallbackType):
+        """
+        执行一步搜索。
+
+        选择节点，分配任务给工作进程，并处理结果。
+
+        Args:
+            exec_callback (ExecCallbackType): 执行回调函数。
+        """
         print("Selecting nodes to process")
         nodes_to_process = self._select_parallel_nodes()
         print(f"Selected nodes: {[n.id if n else None for n in nodes_to_process]}")
@@ -2190,7 +2608,14 @@ class ParallelAgent:
                     logger.info(f"Released GPU for process {process_id}")
 
     def _update_hyperparam_tuning_state(self, result_node: Node):
-        """Update hyperparam tuning tracking state based on execution results."""
+        """
+        更新超参数调优状态。
+
+        根据执行结果更新已尝试的超参数列表。
+
+        Args:
+            result_node (Node): 包含执行结果的节点。
+        """
         if not self.stage_name or not self.stage_name.startswith("2_"):
             return
 
@@ -2208,10 +2633,13 @@ class ParallelAgent:
             logger.warning(f"Hyperparam tuning {hyperparam_name} failed")
 
     def _update_ablation_state(self, result_node: Node):
-        """Update ablation tracking state based on execution results.
+        """
+        更新消融实验状态。
+
+        根据执行结果更新已完成的消融实验列表。
 
         Args:
-            result_node: Node containing ablation execution results
+            result_node (Node): 包含消融实验结果的节点。
         """
         if not self.stage_name or not self.stage_name.startswith("4_"):
             return
@@ -2228,14 +2656,15 @@ class ParallelAgent:
     def _aggregate_seed_eval_results(
         self, seed_nodes: List[Node], parent_node: Node
     ) -> str:
-        """Generate aggregated plots from multi-seed evaluation results.
+        """
+        生成多种子评估结果的聚合绘图代码。
 
         Args:
-            seed_nodes: List of nodes from seed evaluation
-            parent_node: The original node that was evaluated
+            seed_nodes (List[Node]): 种子评估节点列表。
+            parent_node (Node): 原始节点。
 
         Returns:
-            str: The plotting code for aggregated results
+            str: 聚合结果的绘图代码。
         """
         prompt_guideline = []
         prompt_guideline += [
@@ -2331,10 +2760,20 @@ class ParallelAgent:
         return code
 
     def __enter__(self):
+        """
+        上下文管理器进入方法。
+
+        Returns:
+            ParallelAgent: 返回实例本身。
+        """
         return self
 
     def cleanup(self):
-        """Cleanup parallel workers and resources"""
+        """
+        清理并行工作进程和资源。
+
+        释放 GPU 并关闭进程池。
+        """
         if not self._is_shutdown:
             print("Shutting down parallel executor...")
             try:
@@ -2365,4 +2804,14 @@ class ParallelAgent:
                 self._is_shutdown = True
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        上下文管理器退出方法。
+
+        确保资源（如 GPU、进程池）被正确清理。
+
+        Args:
+            exc_type: 异常类型。
+            exc_val: 异常值。
+            exc_tb: 异常回溯。
+        """
         self.cleanup()

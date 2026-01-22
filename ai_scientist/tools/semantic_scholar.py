@@ -1,3 +1,18 @@
+"""
+Semantic Scholar 搜索工具模块
+=============================
+
+本模块提供与 Semantic Scholar API 交互的工具，用于搜索学术文献。
+支持通过 SemanticScholarSearchTool 类或独立的 search_for_papers 函数进行搜索。
+
+主要功能：
+1. SemanticScholarSearchTool: 封装了搜索功能的工具类，继承自 BaseTool。
+2. search_for_papers: 执行搜索请求、处理重试逻辑和格式化结果。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import os
 import requests
 import time
@@ -10,6 +25,14 @@ from ai_scientist.tools.base_tool import BaseTool
 
 
 def on_backoff(details: Dict) -> None:
+    """
+    重试等待时的回调函数。
+
+    打印重试信息，包括等待时间和尝试次数。
+
+    Args:
+        details (Dict): 包含重试详情的字典（wait, tries, target）。
+    """
     print(
         f"Backing off {details['wait']:0.1f} seconds after {details['tries']} tries "
         f"calling function {details['target'].__name__} at {time.strftime('%X')}"
@@ -17,6 +40,13 @@ def on_backoff(details: Dict) -> None:
 
 
 class SemanticScholarSearchTool(BaseTool):
+    """
+    用于在 Semantic Scholar 上搜索相关文献的工具。
+
+    Attributes:
+        max_results (int): 每次搜索返回的最大结果数。默认为 10。
+        S2_API_KEY (str): Semantic Scholar API 密钥，从环境变量 S2_API_KEY 获取。
+    """
     def __init__(
         self,
         name: str = "SearchSemanticScholar",
@@ -43,6 +73,15 @@ class SemanticScholarSearchTool(BaseTool):
             )
 
     def use_tool(self, query: str) -> Optional[str]:
+        """
+        执行搜索并返回格式化后的结果字符串。
+
+        Args:
+            query (str): 搜索查询字符串。
+
+        Returns:
+            Optional[str]: 格式化的论文列表字符串，如果没有找到论文则返回 "No papers found."。
+        """
         papers = self.search_for_papers(query)
         if papers:
             return self.format_papers(papers)
@@ -55,6 +94,17 @@ class SemanticScholarSearchTool(BaseTool):
         on_backoff=on_backoff,
     )
     def search_for_papers(self, query: str) -> Optional[List[Dict]]:
+        """
+        发送 HTTP 请求到 Semantic Scholar API 搜索论文。
+
+        包含自动重试机制（backoff）。
+
+        Args:
+            query (str): 搜索查询字符串。
+
+        Returns:
+            Optional[List[Dict]]: 论文信息字典列表，按引用次数降序排列。如果未找到或出错返回 None。
+        """
         if not query:
             return None
         
@@ -85,6 +135,15 @@ class SemanticScholarSearchTool(BaseTool):
         return papers
 
     def format_papers(self, papers: List[Dict]) -> str:
+        """
+        将论文列表格式化为易读的字符串。
+
+        Args:
+            papers (List[Dict]): 论文信息字典列表。
+
+        Returns:
+            str: 格式化后的字符串。
+        """
         paper_strings = []
         for i, paper in enumerate(papers):
             authors = ", ".join(
@@ -102,6 +161,16 @@ Abstract: {paper.get("abstract", "No abstract available.")}"""
     backoff.expo, requests.exceptions.HTTPError, on_backoff=on_backoff
 )
 def search_for_papers(query, result_limit=10) -> Union[None, List[Dict]]:
+    """
+    独立的搜索函数（非 Tool 类方法）。
+
+    Args:
+        query (str): 搜索查询字符串。
+        result_limit (int): 最大返回结果数。默认为 10。
+
+    Returns:
+        Union[None, List[Dict]]: 论文信息字典列表。
+    """
     S2_API_KEY = os.getenv("S2_API_KEY")
     headers = {}
     if not S2_API_KEY:

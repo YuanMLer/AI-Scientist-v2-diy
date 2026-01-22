@@ -67,3 +67,14 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 ```
 
 These are automatically loaded by the application.
+
+### 5. Config Restructuring (2026-01-21)
+The `bfts_config.yaml` file has been reorganized into two distinct sections to separate core logic from LLM infrastructure:
+
+- **Part 1: Core Configuration**: Contains application logic, data paths, and experimental parameters.
+- **Part 2: Global LLM Configuration**: Centralizes all LLM model definitions and usage profiles.
+
+**Key Changes:**
+- **Task Profiles**: Task-specific LLM settings (temperature, max tokens) were moved from the `agent` section to `llm_config.profiles`.
+- **Reference-Based Config**: The `agent` section now uses OmegaConf interpolation (e.g., `code: ${llm_config.profiles.code}`) to reference these profiles.
+- **Result**: Cleaner separation of concerns while maintaining backward compatibility with code that reads `cfg.agent.code`.

@@ -1,3 +1,20 @@
+"""
+自动绘图模块
+============
+
+本模块负责将分散的实验结果（JSON 摘要和 .npy 数据）汇总并生成最终的论文图表。
+使用 LLM 编写聚合脚本，自动加载数据并使用 Matplotlib/Seaborn 绘图。
+包含多次反思机制以确保生成的图表数量和质量符合要求。
+
+主要功能：
+1. aggregate_plots: 主入口，驱动绘图流程。
+2. build_aggregator_prompt: 构建提示词，指导 LLM 编写绘图脚本。
+3. run_aggregator_script: 执行生成的绘图脚本。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 import argparse
 import json
 import os
@@ -50,6 +67,16 @@ Your output should be the entire Python aggregator script in triple backticks.
 
 
 def build_aggregator_prompt(combined_summaries_str, idea_text):
+    """
+    构建绘图聚合器的 Prompt。
+
+    Args:
+        combined_summaries_str (str): 合并后的实验摘要 JSON 字符串。
+        idea_text (str): 研究想法描述。
+
+    Returns:
+        str: 完整的 Prompt 字符串。
+    """
     return f"""
 We have three JSON summaries of scientific experiments: baseline, research, ablation.
 They may contain lists of figure descriptions, code to generate the figures, and paths to the .npy files containing the numerical results.
@@ -88,8 +115,13 @@ Respond with a Python script in triple backticks.
 
 def extract_code_snippet(text: str) -> str:
     """
-    Look for a Python code block in triple backticks in the LLM response.
-    Return only that code. If no code block is found, return the entire text.
+    从 LLM 响应中提取 Python 代码块。
+
+    Args:
+        text (str): LLM 响应文本。
+
+    Returns:
+        str: 提取出的 Python 代码。如果未找到代码块，则返回原文本。
     """
     pattern = r"```(?:python)?(.*?)```"
     matches = re.findall(pattern, text, flags=re.DOTALL)
@@ -99,6 +131,20 @@ def extract_code_snippet(text: str) -> str:
 def run_aggregator_script(
     aggregator_code, aggregator_script_path, base_folder, script_name
 ):
+    """
+    运行生成的绘图脚本。
+
+    将代码写入文件并在子进程中执行。
+
+    Args:
+        aggregator_code (str): 绘图脚本代码。
+        aggregator_script_path (str): 脚本保存路径。
+        base_folder (str): 实验根目录。
+        script_name (str): 脚本文件名。
+
+    Returns:
+        str: 脚本执行的输出（stdout + stderr）。
+    """
     if not aggregator_code.strip():
         print("No aggregator code was provided. Skipping aggregator script run.")
         return ""
@@ -136,6 +182,17 @@ def run_aggregator_script(
 def aggregate_plots(
     base_folder: str, model: str = "ollama", n_reflections: int = 5
 ) -> None:
+    """
+    执行自动绘图流程。
+
+    加载实验数据，生成绘图脚本，执行并验证结果。
+    如果生成的图表数量不足，会进行反思重试。
+
+    Args:
+        base_folder (str): 实验根目录。
+        model (str, optional): 使用的 LLM 模型。默认为 "ollama"。
+        n_reflections (int, optional): 最大反思重试次数。默认为 5。
+    """
     filename = "auto_plot_aggregator.py"
     aggregator_script_path = os.path.join(base_folder, filename)
     figures_dir = os.path.join(base_folder, "figures")

@@ -38,7 +38,18 @@ class ExecutionResult(DataClassJsonMixin):
 
 
 def exception_summary(e, working_dir, exec_file_name, format_tb_ipython):
-    """Generates a string that summarizes an exception and its stack trace (either in standard python repl or in IPython format)."""
+    """
+    生成异常及其堆栈跟踪的摘要字符串（支持标准 Python REPL 或 IPython 格式）。
+    
+    Args:
+        e (Exception): 捕获的异常对象。
+        working_dir (Path): 当前工作目录。
+        exec_file_name (str): 执行的文件名。
+        format_tb_ipython (bool): 是否使用 IPython 格式化堆栈跟踪。
+        
+    Returns:
+        tuple: (堆栈跟踪字符串, 异常类名, 异常详细信息, 堆栈列表)
+    """
     if format_tb_ipython:
         import IPython.core.ultratb
 
@@ -46,12 +57,12 @@ def exception_summary(e, working_dir, exec_file_name, format_tb_ipython):
         tb_str = str(tb.text(*sys.exc_info()))
     else:
         tb_lines = traceback.format_exception(e)
-        # skip parts of stack trace in weflow code
+        # 跳过 weflow 代码中的堆栈部分
         tb_str = "".join(
             [l for l in tb_lines if "treesearch/" not in l and "importlib" not in l]
         )
 
-    # replace whole path to file with just filename (to remove agent workspace dir)
+    # 将完整路径替换为仅文件名（移除代理工作空间目录路径，使输出更清晰）
     tb_str = tb_str.replace(str(working_dir / exec_file_name), exec_file_name)
 
     exc_info = {}
@@ -68,6 +79,9 @@ def exception_summary(e, working_dir, exec_file_name, format_tb_ipython):
 
 
 class RedirectQueue:
+    """
+    将标准输出/错误重定向到多进程队列的辅助类。
+    """
     def __init__(self, queue):
         self.queue = queue
 
@@ -88,16 +102,16 @@ class Interpreter:
         env_vars: dict[str, str] = {},
     ):
         """
-        Simulates a standalone Python REPL with an execution time limit.
+        模拟具有执行时间限制的独立 Python REPL。
 
         Args:
-            working_dir (Path | str): working directory of the agent
-            timeout (int, optional): Timeout for each code execution step. Defaults to 3600.
-            format_tb_ipython (bool, optional): Whether to use IPython or default python REPL formatting for exceptions. Defaults to False.
-            agent_file_name (str, optional): The name for the agent's code file. Defaults to "runfile.py".
-            env_vars (dict[str, str], optional): Environment variables to set in the child process. Defaults to {}.
+            working_dir (Path | str): 代理的工作目录。
+            timeout (int, optional): 每个代码执行步骤的超时时间（秒）。默认为 3600。
+            format_tb_ipython (bool, optional): 异常格式化是否使用 IPython 格式。默认为 False。
+            agent_file_name (str, optional): 代理代码文件的名称。默认为 "runfile.py"。
+            env_vars (dict[str, str], optional): 设置在子进程中的环境变量。默认为 {}。
         """
-        # this really needs to be a path, otherwise causes issues that don't raise exc
+        # 必须是绝对路径，否则可能会引发未捕获的问题
         self.working_dir = Path(working_dir).resolve()
         assert (
             self.working_dir.exists()
@@ -212,33 +226,32 @@ class Interpreter:
 
     def run(self, code: str, reset_session=True) -> ExecutionResult:
         """
-        Execute the provided Python command in a separate process and return its output.
+        在单独的进程中执行提供的 Python 命令并返回其输出。
 
-        Parameters:
-            code (str): Python code to execute.
-            reset_session (bool, optional): Whether to reset the interpreter session before executing the code. Defaults to True.
+        Args:
+            code (str): 要执行的 Python 代码。
+            reset_session (bool, optional): 是否在执行代码前重置解释器会话。默认为 True。
 
         Returns:
-            ExecutionResult: Object containing the output and metadata of the code execution.
-
+            ExecutionResult: 包含代码执行输出和元数据的对象。
         """
 
         logger.debug(f"REPL is executing code (reset_session={reset_session})")
 
         if reset_session:
             if self.process is not None:
-                # terminate and clean up previous process
+                # 终止并清理之前的进程
                 self.cleanup_session()
             self.create_process()
         else:
-            # reset_session needs to be True on first exec
+            # 第一次执行时 reset_session 必须为 True
             assert self.process is not None
 
         assert self.process.is_alive()
 
         self.code_inq.put(code)
 
-        # wait for child to actually start execution (we don't want interrupt child setup)
+        # 等待子进程实际开始执行（我们不想中断子进程的设置）
         try:
             state = self.event_outq.get(timeout=10)
         except queue.Empty:
@@ -250,19 +263,19 @@ class Interpreter:
         assert state[0] == "state:ready", state
         start_time = time.time()
 
-        # this flag indicates that the child ahs exceeded the time limit and an interrupt was sent
-        # if the child process dies without this flag being set, it's an unexpected termination
+        # 此标志指示子进程已超时并发送了中断信号
+        # 如果子进程在没有设置此标志的情况下死亡，则是意外终止
         child_in_overtime = False
 
         while True:
             try:
-                # check if the child is done
+                # 检查子进程是否完成
                 state = self.event_outq.get(timeout=1)  # wait for state:finished
                 assert state[0] == "state:finished", state
                 exec_time = time.time() - start_time
                 break
             except queue.Empty:
-                # we haven't heard back from the child -> check if it's still alive (assuming overtime interrupt wasn't sent yet)
+                # 我们没有收到子进程的回复 -> 检查它是否仍然存活（假设尚未发送超时中断）
                 if not child_in_overtime and not self.process.is_alive():
                     msg = "REPL child process died unexpectedly"
                     logger.critical(msg)
@@ -272,7 +285,7 @@ class Interpreter:
                         )
                     raise RuntimeError(msg) from None
 
-                # child is alive and still executing -> check if we should sigint..
+                # 子进程仍然存活且正在执行 -> 检查是否应该发送 sigint..
                 if self.timeout is None:
                     continue
                 running_time = time.time() - start_time
@@ -280,10 +293,10 @@ class Interpreter:
                     # [TODO] handle this in a better way
                     assert reset_session, "Timeout ocurred in interactive session"
 
-                    # send interrupt to child
+                    # 发送中断信号给子进程
                     os.kill(self.process.pid, signal.SIGINT)  # type: ignore
                     child_in_overtime = True
-                    # terminate if we're overtime by more than a minute
+                    # 如果超时超过一分钟，则终止进程
                     if running_time > self.timeout + 60:
                         logger.warning("Child failed to terminate, killing it..")
                         self.cleanup_session()
@@ -293,9 +306,8 @@ class Interpreter:
                         break
 
         output: list[str] = []
-        # read all stdout/stderr from child up to the EOF marker
-        # waiting until the queue is empty is not enough since
-        # the feeder thread in child might still be adding to the queue
+        # 读取子进程的所有 stdout/stderr 直到 EOF 标记
+        # 等待队列为空是不够的，因为子进程中的 feeder 线程可能仍在向队列添加内容
         while not self.result_outq.empty() or not output or output[-1] != "<|EOF|>":
             output.append(self.result_outq.get())
         output.pop()  # remove the EOF marker

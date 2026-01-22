@@ -1,3 +1,7 @@
+# =============================================================================
+# Part 1: Core Configuration (Application Logic, Data, Experiments)
+# =============================================================================
+
 # path to the task data directory
 data_dir: "data"
 preprocess_data: False
@@ -22,9 +26,8 @@ exec:
 
 generate_report: True
 # LLM settings for final report from journal
-report:
-  model: ollama/nemotron-3-nano:latest
-  temp: 1.0
+# Referenced from Global LLM Configuration
+report: ${llm_config.profiles.report}
 
 experiment:
   num_syn_datasets: 1
@@ -53,42 +56,32 @@ agent:
   data_preview: False
 
   # LLM settings for coding
-  code:
-    model: ollama/nemotron-3-nano:latest
-    temp: 1.0
-    max_tokens: 12000
+  # Referenced from Global LLM Configuration
+  code: ${llm_config.profiles.code}
 
   # LLM settings for evaluating program output / tracebacks
-  feedback:
-    model: ollama/nemotron-3-nano:latest
-    # gpt-4o
-    temp: 0.5
-    max_tokens: 8192
+  # Referenced from Global LLM Configuration
+  feedback: ${llm_config.profiles.feedback}
 
-  vlm_feedback:
-    model: ollama/nemotron-3-nano:latest
-    temp: 0.5
-    max_tokens: null
+  # VLM settings
+  # Referenced from Global LLM Configuration
+  vlm_feedback: ${llm_config.profiles.vlm_feedback}
 
   search:
     max_debug_depth: 3
     debug_prob: 0.5
     num_drafts: 3
 
-  # Options for summarizing findings and selecting the best node
-  # If not specified, the default behavior will be used.
 
-  # summary:
-  #   model: gpt-4o
-  #   temp: 0.3
 
-  # select_node:
-  #   model: gpt-4o
-  #   temp: 0.3
+# =============================================================================
+# Part 2: Global LLM Configuration
+# =============================================================================
+# This section centralizes all Large Language Model (LLM) configurations.
+# It includes:
+# 1. Model definitions (Providers, API Keys, Base URLs)
+# 2. Usage profiles (Task-specific settings like temperature, tokens)
 
-# Global LLM Configuration
-# Defines connection details for various models and providers.
-# API Keys are loaded from environment variables using ${oc.env:VAR_NAME}
 llm_config:
   default_model: "ollama/nemotron-3-nano:latest"
   
@@ -102,6 +95,36 @@ llm_config:
       base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
       api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
   
+  # -------------------------------------------------------------------------
+  # Usage Profiles (Task-specific configurations)
+  # -------------------------------------------------------------------------
+  profiles:
+    # Profile for generating code (coding agent)
+    code:
+      model: "ollama/nemotron-3-nano:latest"
+      temp: 1.0
+      max_tokens: 12000
+    
+    # Profile for providing feedback and evaluation
+    feedback:
+      model: "ollama/nemotron-3-nano:latest"
+      temp: 0.5
+      max_tokens: 8192
+    
+    # Profile for VLM (Visual Language Model) feedback
+    vlm_feedback:
+      model: "ollama/nemotron-3-nano:latest"
+      temp: 0.5
+      max_tokens: null
+    
+    # Profile for generating the final report
+    report:
+      model: "ollama/nemotron-3-nano:latest"
+      temp: 1.0
+
+  # -------------------------------------------------------------------------
+  # Model Definitions
+  # -------------------------------------------------------------------------
   models:
     # Ollama Models
     "ollama/nemotron-3-nano:latest":
@@ -200,4 +223,3 @@ llm_config:
       provider: "ollama"
       base_url: "${oc.env:OLLAMA_BASE_URL, 'http://1.13.248.121:15699/v1'}"
       api_key: "${oc.env:OLLAMA_API_KEY, 'ollama'}"
-

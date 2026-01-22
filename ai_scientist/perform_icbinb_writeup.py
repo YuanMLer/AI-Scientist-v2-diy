@@ -1,3 +1,19 @@
+"""
+ICBINB (I Can't Believe It's Not Better) 论文撰写模块
+===================================================
+
+本模块负责生成和编译 ICBINB 风格的论文，重点关注深度学习中的陷阱、失败案例和挑战。
+支持从 LaTeX 模板编译 PDF、检查页面限制、清理文本以及使用 LLM 和 Semantic Scholar 添加引用。
+
+主要功能：
+1. compile_latex: 编译 LaTeX 项目生成 PDF。
+2. check_page_limit: 检查生成的 PDF 是否符合页面限制（通常为 4 页）。
+3. get_citation_addition: 使用 LLM 和 Semantic Scholar 搜索并添加相关引用。
+4. remove_accents_and_clean: 清理字符串中的重音符号和非 ASCII 字符。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
 import argparse
 import json
 import os
@@ -31,6 +47,18 @@ from ai_scientist.vlm import create_client as create_vlm_client
 
 
 def remove_accents_and_clean(s):
+    """
+    移除字符串中的重音符号并进行清理。
+
+    将字符串标准化为 NFKD 形式，移除非 ASCII 字符，保留特定的标点符号，
+    并转换为小写。主要用于清理 BibTeX 引用键等。
+
+    Args:
+        s (str): 输入字符串。
+
+    Returns:
+        str: 清理后的字符串。
+    """
     # Normalize to separate accents
     nfkd_form = unicodedata.normalize("NFKD", s)
     # Remove non-ASCII characters
@@ -43,6 +71,17 @@ def remove_accents_and_clean(s):
 
 
 def compile_latex(cwd, pdf_file, timeout=30):
+    """
+    编译 LaTeX 项目生成 PDF 文件。
+
+    依次运行 pdflatex -> bibtex -> pdflatex -> pdflatex 以确保引用正确解析。
+    如果编译成功，将生成的 PDF 移动到指定位置。
+
+    Args:
+        cwd (str): LaTeX 项目所在的目录。
+        pdf_file (str): 目标 PDF 文件的路径。
+        timeout (int): 每个命令的超时时间（秒），默认为 30。
+    """
     print("GENERATING LATEX")
 
     commands = [
@@ -110,8 +149,15 @@ def is_header_or_footer(line):
 
 def clean_lines(content):
     """
-    Given raw text content, split it into lines and remove lines that are
-    likely headers/footers or otherwise not part of the main content.
+    清理文本内容，移除页眉和页脚行。
+
+    将原始内容按行分割，并过滤掉被判定为页眉或页脚的行。
+
+    Args:
+        content (str): 原始文本内容。
+
+    Returns:
+        list[str]: 清理后的行列表。
     """
     lines = content.splitlines()
     # Keep only lines that are not detected as headers/footers.
@@ -185,10 +231,17 @@ def detect_references_position_clean(pdf_file):
 
 def extract_page_line_counts(pdf_file, first_page, last_page):
     """
-    Extract the number of cleaned text lines for each page from first_page to last_page.
-    This uses pdftotext with layout preservation and the clean_lines helper.
-    Returns a dictionary {page_number: number_of_cleaned_lines}.
-    Pages for which extraction fails are omitted.
+    提取指定页码范围内每页的清理后行数。
+
+    使用 pdftotext 提取文本并清理，统计剩余行数。
+
+    Args:
+        pdf_file (str): PDF 文件路径。
+        first_page (int): 起始页码。
+        last_page (int): 结束页码。
+
+    Returns:
+        dict: {页码: 清理后的行数} 字典。
     """
     page_lines = {}
     for page in range(first_page, last_page + 1):
@@ -237,20 +290,18 @@ def extract_page_line_counts(pdf_file, first_page, last_page):
 
 def check_page_limit(pdf_file, page_limit=4, timeout=30):
     """
-    Compile the LaTeX project in a temporary folder, then determine where the
-    "References" section begins using cleaned text extraction. Next, count the
-    number of cleaned text lines used before the word "References" and compare that
-    to the total number of cleaned lines available in the allowed number of pages (page_limit).
+    检查 PDF 文件是否符合页面限制。
 
-    Returns a dictionary with:
-      - 'ref_page': page number where "References" was found (or None)
-      - 'ref_line': cleaned line number within that page (or None)
-      - 'used_lines': number of cleaned lines used for main content (before "References")
-      - 'allowed_lines': total number of cleaned text lines available in pages 1..page_limit
-      - 'excess': if used_lines > allowed_lines (number of lines over the limit),
-      - 'available': if used_lines < allowed_lines (number of lines still available)
+    通过定位 "References" 部分，计算正文使用的清理后行数，并与允许的行数进行比较。
 
-    If compilation or extraction fails, returns None.
+    Args:
+        pdf_file (str): PDF 文件路径。
+        page_limit (int): 允许的最大页数（正文），默认为 4。
+        timeout (int): 超时时间（秒），默认为 30。
+
+    Returns:
+        dict | None: 包含页面使用情况的字典（ref_page, ref_line, used_lines, allowed_lines, excess/available）。
+                     如果检查失败返回 None。
     """
     try:
         # Ensure the PDF was produced
@@ -302,6 +353,19 @@ def check_page_limit(pdf_file, page_limit=4, timeout=30):
 
 
 def get_reflection_page_info(reflection_pdf, page_limit):
+    """
+    获取关于页面限制的反馈信息。
+
+    调用 check_page_limit 获取详细信息，并格式化为人类可读的建议字符串，
+    指导用户如何调整内容以符合页面限制。
+
+    Args:
+        reflection_pdf (str): PDF 文件路径。
+        page_limit (int): 页面限制。
+
+    Returns:
+        str: 包含页面使用情况和建议的字符串。
+    """
     info = check_page_limit(reflection_pdf, page_limit)
     if info is not None:
         if "excess" in info:
@@ -337,6 +401,26 @@ def get_reflection_page_info(reflection_pdf, page_limit):
 def get_citation_addition(
     client, model, context, current_round, total_rounds, idea_text
 ):
+    """
+    使用 LLM 和 Semantic Scholar 搜索并添加相关引用。
+
+    模拟研究者寻找引用的过程：
+    1. 分析当前报告和引用列表，决定需要查找的引用类型。
+    2. 使用 Semantic Scholar 搜索论文。
+    3. 从搜索结果中选择最合适的论文，并添加到引用列表中。
+
+    Args:
+        client: LLM 客户端实例。
+        model (str): 使用的模型名称。
+        context (tuple): (当前报告内容, 当前引用列表字符串)。
+        current_round (int): 当前轮次。
+        total_rounds (int): 总轮次。
+        idea_text (str): 论文创意文本。
+
+    Returns:
+        tuple: (None, bool)
+               第一个元素为 None (保留结构)，第二个元素为 bool，表示是否完成了引用搜索（True 表示不需要更多引用）。
+    """
     report, citations = context
     msg_history = []
     citation_system_msg_template = """You are an ambitious AI researcher who is looking to publish a paper to a workshop at ICLR 2025 that explores real-world pitfalls, failures, and challenges in deep learning.

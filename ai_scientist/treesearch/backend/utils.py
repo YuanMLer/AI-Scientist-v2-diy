@@ -1,3 +1,20 @@
+"""
+后端工具模块
+============
+
+本模块提供与 LLM 后端交互的通用工具函数。
+包含重试机制、消息格式化、Prompt 编译以及函数调用规格定义。
+
+主要功能：
+1. backoff_create: 带有指数退避重试机制的 API 调用包装器。
+2. opt_messages_to_list: 将系统消息和用户消息转换为列表格式。
+3. compile_prompt_to_md: 将不同类型的 Prompt (字符串、列表、字典) 编译为 Markdown 格式。
+4. FunctionSpec: 定义 LLM 可调用的工具函数规格。
+
+作者: AI Scientist Team
+日期: 2025-01-22
+"""
+
 from dataclasses import dataclass
 
 import jsonschema
@@ -23,6 +40,20 @@ logger = logging.getLogger("ai-scientist")
 def backoff_create(
     create_fn: Callable, retry_exceptions: list[Exception], *args, **kwargs
 ):
+    """
+    带有指数退避重试机制的 API 调用包装器。
+
+    如果发生指定的异常，将自动重试，等待时间按指数增长。
+
+    Args:
+        create_fn (Callable): 要调用的 API 创建函数。
+        retry_exceptions (list[Exception]): 需要重试的异常类型列表。
+        *args: 传递给 create_fn 的位置参数。
+        **kwargs: 传递给 create_fn 的关键字参数。
+
+    Returns:
+        Any: create_fn 的返回值，如果失败则可能返回 False。
+    """
     try:
         return create_fn(*args, **kwargs)
     except retry_exceptions as e:
@@ -33,6 +64,16 @@ def backoff_create(
 def opt_messages_to_list(
     system_message: str | None, user_message: str | None
 ) -> list[dict[str, str]]:
+    """
+    将可选的系统消息和用户消息转换为消息列表。
+
+    Args:
+        system_message (str | None): 系统提示消息，如果为 None 则忽略。
+        user_message (str | None): 用户提示消息，如果为 None 则忽略。
+
+    Returns:
+        list[dict[str, str]]: 包含角色和内容的消息字典列表。
+    """
     messages = []
     if system_message:
         messages.append({"role": "system", "content": system_message})
@@ -42,7 +83,24 @@ def opt_messages_to_list(
 
 
 def compile_prompt_to_md(prompt: PromptType, _header_depth: int = 1) -> str:
-    """Convert a prompt into markdown format"""
+    """
+    将 Prompt 转换为 Markdown 格式。
+
+    支持字符串、列表和字典类型的 Prompt。
+    - 字符串：直接返回。
+    - 列表：转换为 Markdown 列表项。
+    - 字典：递归转换为 Markdown 标题和内容。
+
+    Args:
+        prompt (PromptType): 输入的 Prompt，可以是字符串、列表或字典。
+        _header_depth (int): 当前 Markdown 标题深度，用于递归调用。默认为 1。
+
+    Returns:
+        str: 转换后的 Markdown 字符串。
+
+    Raises:
+        ValueError: 如果 Prompt 类型不支持。
+    """
     try:
         logger.debug(f"compile_prompt_to_md input: type={type(prompt)}")
         if isinstance(prompt, (list, dict)):
@@ -104,16 +162,38 @@ def compile_prompt_to_md(prompt: PromptType, _header_depth: int = 1) -> str:
 
 @dataclass
 class FunctionSpec(DataClassJsonMixin):
+    """
+    函数规格说明类。
+
+    用于定义 LLM 可调用的工具函数（Tools/Functions），包含名称、JSON Schema 和描述。
+    支持转换为 OpenAI API 所需的工具格式。
+
+    Args:
+        name (str): 函数名称。
+        json_schema (dict): 函数参数的 JSON Schema。
+        description (str): 函数描述。
+    """
     name: str
     json_schema: dict  # JSON schema
     description: str
 
     def __post_init__(self):
+        """
+        初始化后验证。
+
+        检查提供的 JSON Schema 是否有效。
+        """
         # validate the schema
         jsonschema.Draft7Validator.check_schema(self.json_schema)
 
     @property
     def as_openai_tool_dict(self):
+        """
+        转换为 OpenAI 工具定义字典。
+
+        Returns:
+            dict: OpenAI API 格式的工具定义。
+        """
         return {
             "type": "function",
             "function": {
@@ -125,6 +205,14 @@ class FunctionSpec(DataClassJsonMixin):
 
     @property
     def openai_tool_choice_dict(self):
+        """
+        获取 OpenAI 工具选择字典。
+
+        用于指定强制调用该函数。
+
+        Returns:
+            dict: OpenAI API 格式的工具选择字典。
+        """
         return {
             "type": "function",
             "function": {"name": self.name},
