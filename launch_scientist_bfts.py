@@ -48,6 +48,7 @@ from ai_scientist.perform_icbinb_writeup import (
 )
 from ai_scientist.perform_llm_review import perform_review, load_paper
 from ai_scientist.perform_vlm_review import perform_imgs_cap_ref_review
+
 from ai_scientist.utils.token_tracker import token_tracker
 
 
@@ -97,20 +98,22 @@ def parse_arguments():
         help="包含预生成想法的 JSON 文件路径",
     )
     parser.add_argument(
-        "--load_code",
-        action="store_true",
-        help="如果设置，加载与想法文件同名但扩展名为 .py 的 Python 代码文件",
-    )
-    parser.add_argument(
         "--idea_idx",
         type=int,
         default=0,
         help="要运行的想法索引",
     )
     parser.add_argument(
-        "--add_dataset_ref",
-        action="store_true",
-        help="如果设置，向想法中添加 Hugging Face 数据集引用",
+        "--code_ref_path",
+        type=str,
+        default=None,
+        help="指定参考代码的存储路径",
+    )
+    parser.add_argument(
+        "--dataset_ref_path",
+        type=str,
+        default=None,
+        help="指定参考数据集的元数据文件路径",
     )
     parser.add_argument(
         "--writeup-retries",
@@ -170,6 +173,7 @@ def parse_arguments():
         action="store_true",
         help="如果设置，跳过评审过程",
     )
+
     return parser.parse_args()
 
 
@@ -279,43 +283,46 @@ if __name__ == "__main__":
     # 将想法 JSON 转换为 Markdown 文件，方便阅读和后续处理
     idea_path_md = osp.join(idea_dir, "idea.md")
 
-    # 如果 load_code 为 True，获取与 JSON 同名的 Python 文件内容
+    # 处理参考代码
     code = None
-    if args.load_code:
-        code_path = args.load_ideas.rsplit(".", 1)[0] + ".py"
+    code_path = None
+    
+    if args.code_ref_path:
+        code_path = args.code_ref_path
         if os.path.exists(code_path):
+            print(f"Loading reference code from {code_path}")
             with open(code_path, "r") as f:
                 code = f.read()
         else:
-            print(f"Warning: Code file {code_path} not found")
-    else:
-        code_path = None
+            print(f"Warning: Code ref path {code_path} does not exist.")
+
 
     # 生成想法 Markdown 文件
     idea_to_markdown(ideas[args.idea_idx], idea_path_md, code_path)
 
-    # 处理数据集引用代码
-    dataset_ref_code = None
-    if args.add_dataset_ref:
-        dataset_ref_path = "hf_dataset_reference.py"
+    # 处理数据集引用/描述
+    dataset_ref_content = None
+    
+    if args.dataset_ref_path:
+        dataset_ref_path = args.dataset_ref_path
         if os.path.exists(dataset_ref_path):
+            print(f"Loading dataset reference from {dataset_ref_path}")
             with open(dataset_ref_path, "r") as f:
-                dataset_ref_code = f.read()
+                dataset_ref_content = f.read()
         else:
-            print(f"Warning: Dataset reference file {dataset_ref_path} not found")
-            dataset_ref_code = None
+            print(f"Warning: Dataset ref path {dataset_ref_path} does not exist.")
+
 
     # 组合初始代码（数据集引用 + 加载的代码）
-    if dataset_ref_code is not None and code is not None:
-        added_code = dataset_ref_code + "\n" + code
-    elif dataset_ref_code is not None and code is None:
-        added_code = dataset_ref_code
-    elif dataset_ref_code is None and code is not None:
-        added_code = code
-    else:
-        added_code = None
+    added_code_parts = []
+    if dataset_ref_content:
+        added_code_parts.append(dataset_ref_content)
+    if code:
+        added_code_parts.append(code)
+    
+    added_code = "\n\n".join(added_code_parts) if added_code_parts else None
 
-    print(added_code)
+    print(f"Added code content length: {len(added_code) if added_code else 0}")
 
     # 如果有加载代码，将其添加到想法 JSON 中
     if added_code is not None:
