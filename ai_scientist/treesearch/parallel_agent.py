@@ -2496,7 +2496,12 @@ class ParallelAgent:
                 }
             )
         else:
-            memory_summary = self.journal.generate_summary(include_code=False)
+            # Fallback to default model if summary profile is not defined
+            default_model = self.cfg.llm_config.default_model
+            memory_summary = self.journal.generate_summary(
+                include_code=False,
+                model=default_model
+            )
 
         print("Submitting tasks to process pool")
         futures = []

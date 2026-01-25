@@ -585,7 +585,10 @@ class Journal:
 
         try:
             if cfg is None or cfg.agent.get("select_node", None) is None:
-                model = "gpt-4o"
+                if cfg and hasattr(cfg, "llm_config") and hasattr(cfg.llm_config, "default_model"):
+                    model = cfg.llm_config.default_model
+                else:
+                    raise ValueError("No default model specified in configuration.")
                 temperature = 0.3
             else:
                 model = cfg.agent.select_node.model
@@ -669,7 +672,7 @@ class Journal:
                 "2. Common failure patterns and pitfalls to avoid\n"
                 "3. Specific recommendations for future experiments based on both successes and failures"
             ),
-            model=model_kwargs.get("model", "gpt-4o"),
+            model=model_kwargs.get("model"),
             temperature=model_kwargs.get("temp", 0.3)
         )
 
@@ -737,11 +740,18 @@ class Journal:
             ),
         }
 
+        # Fallback to default model if summary profile is not defined
+        default_model = None
+        if hasattr(cfg, "llm_config") and hasattr(cfg.llm_config, "default_model"):
+            default_model = cfg.llm_config.default_model
+        else:
+            raise ValueError("No default model specified in configuration.")
+
         stage_summary = query(
             system_message=summary_prompt,
             user_message="Generate a comprehensive summary of the experimental findings in this stage",
-            model=cfg.agent.summary.model if cfg.agent.get("summary", None) else "gpt-4o",
-            temperature=cfg.agent.summary.temp if cfg.agent.get("summary", None) else 0.3
+            model=cfg.llm_config.profiles.summary.model if cfg.agent.get("summary", None) else default_model,
+            temperature=cfg.llm_config.profiles.summary.temp if cfg.agent.get("summary", None) else 0.3
         )
 
         with open(os.path.join(notes_dir, f"{stage_name}_summary.txt"), "w") as f:
